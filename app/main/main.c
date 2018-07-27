@@ -1315,6 +1315,9 @@ void app_main()
 #include "soc/timer_group_struct.h"
 #include "driver/periph_ctrl.h"
 #include "driver/timer.h"
+#include "esp_system.h"
+#include "sys/time.h"
+#include "stdint.h"
 
 /**
  * Brief:
@@ -1337,20 +1340,71 @@ void app_main()
 #define GPIO_OUTPUT_IO_1    19
 #define GPIO_OUTPUT_PIN_SEL  ((1ULL<<GPIO_OUTPUT_IO_0) | (1ULL<<GPIO_OUTPUT_IO_1))
 #define GPIO_INPUT_IO_0     4
-#define GPIO_INPUT_IO_1     5
+#define GPIO_INPUT_IO_1     33
 #define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1))
 #define ESP_INTR_FLAG_DEFAULT 0
 
 static xQueueHandle gpio_evt_queue = NULL;
 
 unsigned int pwmCount=0;
+int getTime=0;
+int64_t current_time;
+static int64_t last_time = 0;
+
+int64_t current_time;
+
+struct timeval system_time;
+
+struct timeval tv1, tv2;
+uint64_t t1;
+uint64_t t2;
+
+static inline uint64_t timeval_to_usec(struct timeval* tv)
+{
+    return 1000000LL * tv->tv_sec + tv->tv_usec;
+}
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
-    if(gpio_num == GPIO_INPUT_IO_1 ) pwmCount++;
+    if(gpio_num == GPIO_INPUT_IO_1 )
+    {
+    	if(pwmCount==1)
+    	{
+    		/* 获取此时的时间 */
+        	gettimeofday(&system_time,NULL);
+        	/* 转换成ms */
+        	//current_time = system_time.tv_usec*1000+(system_time.tv_sec/1000);
 
-   // xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+        	//printf("currentTime %llu",current_time);  //reboot why
+
+            gettimeofday(&tv1, NULL);
+            //gettimeofday(&tv2, NULL);
+            t1 = timeval_to_usec(&tv1);
+
+    	}
+    	pwmCount++;
+    	if(pwmCount>=1001)
+    	{
+    		//gettimeofday(&system_time,NULL);
+    		//last_time = system_time.tv_usec*1000+(system_time.tv_sec/1000);
+
+    		//f=(last_time-current_time)/1000  that is  T=1000/((last_time-current_time))
+    		//C=T*1.443/(R1 + 2*R2)  = 1443.0/((last_time-current_time)*104.0)
+    		//uint32_t getTime= (last_time-current_time);
+    		//printf("currentTime %d",getTime);
+    		//printf("======Capacity : %.8f F,Timevalue=%.9d ------\n", (double) ((double)1443.0/(getTime*104.0)),getTime); // //reboot why
+
+    		gettimeofday(&tv2, NULL);
+    		t2 = timeval_to_usec(&tv2);
+
+    		pwmCount=0;
+    		 xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+    	}
+
+    }
+
+
 }
 
 static void gpio_task_example(void* arg)
@@ -1358,7 +1412,13 @@ static void gpio_task_example(void* arg)
     uint32_t io_num;
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+            printf("GPIO[%d] intr, val: %d/%d \n", io_num, gpio_get_level(io_num),pwmCount);
+
+    		printf("t1=%lld t2=%lld t2-t1=%lld\r\n", t1, t2, t2 - t1);
+    		uint64_t  t=(double)(t2 - t1)/1000.0;
+    		printf("-----Capacity : %.9f uF ------\n", (double)t/(double)(0.693*104000));
+           // printf("==Counter: 0x%08x%08x\n", (uint32_t) (current_time >> 32), (uint32_t) (current_time));
+           // printf("--Counter: 0x%08x%08x\n", (uint32_t) (last_time >> 32),(uint32_t) (last_time));
         }
     }
 }
@@ -1478,6 +1538,10 @@ static void example_tg0_timer_init(int timer_idx,
     timer_start(TIMER_GROUP_0, timer_idx);
 }
 
+
+#define _555_R1  10000  //10kohm
+#define _555_R2  47000	//47Kohm
+#define _555_C  0.0000001  //0.1uf
 /*
  * The main task of this example program
  */
@@ -1493,6 +1557,9 @@ static void timer_example_evt_task(void *arg)
             if(pwmCount)
             {
             	printf("-----Frequency : %.8f Hz,pwmCount=%d ------\n", (double) ((double)pwmCount/(TIMER_INTERVAL0_SEC)),pwmCount);
+            	printf("-----Capacity : %.8f F ------\n", (double) (((double)1.443*TIMER_INTERVAL0_SEC/(double)pwmCount)/104000.0));
+            	//c=1.443/(f*(R13+2*R14))   F = 1.44 / ( (R1 + 2R2) * C)    T=( (R1 + 2R2) * C)  /1.443  C=T*1.443/(R1 + 2*R2)
+            	//R13=10K R14=47K   C=(TIMER_INTERVAL0_SEC)*1.443/((_555_R1 + 2*_555_R2)*(double)pwmCount)
             	pwmCount=0;
             }
 
@@ -1519,13 +1586,14 @@ static void timer_example_evt_task(void *arg)
 
 
 
+
 void app_main()
 {
 	//timer
-    timer_queue = xQueueCreate(11, sizeof(timer_event_t));
-    example_tg0_timer_init(TIMER_0, TEST_WITHOUT_RELOAD, TIMER_INTERVAL0_SEC);
+//    timer_queue = xQueueCreate(11, sizeof(timer_event_t));
+//    example_tg0_timer_init(TIMER_0, TEST_WITHOUT_RELOAD, TIMER_INTERVAL0_SEC);
     //example_tg0_timer_init(TIMER_1, TEST_WITH_RELOAD,    TIMER_INTERVAL1_SEC);
-    xTaskCreate(timer_example_evt_task, "timer_evt_task", 2048, NULL, 5, NULL);
+//    xTaskCreate(timer_example_evt_task, "timer_evt_task", 2048, NULL, 5, NULL);
 
 
 	//gpio
@@ -1574,12 +1642,26 @@ void app_main()
     gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
 
     int cnt = 0;
+
+
+
     while(1) {
         //printf("cnt: %d\n", cnt++);
         cnt++;
-        vTaskDelay(100 / portTICK_RATE_MS);
+        //vTaskDelay(100 / portTICK_RATE_MS);//示波器实测 200ms
+        vTaskDelay(10 / portTICK_RATE_MS);//示波器实测 50Hz 20ms
+        //vTaskDelay(1000 / portTICK_RATE_MS);//示波器实测1Hz  1s
         gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
         gpio_set_level(GPIO_OUTPUT_IO_1, cnt % 2);
+#if 0
+        struct timeval tv1, tv2;
+        gettimeofday(&tv1, NULL);
+        gettimeofday(&tv2, NULL);
+        uint64_t t1 = timeval_to_usec(&tv1);
+        uint64_t t2 = timeval_to_usec(&tv2);
+        printf("t1=%lld t2=%lld t2-t1=%lld\r\n", t1, t2, t2 - t1);  //1000000us
+#endif
+
     }
 }
 
