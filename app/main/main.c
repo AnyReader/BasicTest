@@ -1271,7 +1271,7 @@ void rainbow(void *pvParameters)
     }
 
     ws2812_setColors(pixel_count, pixels);
-    printf("free mem=%d \r\n", esp_get_free_heap_size());
+    //printf("free mem=%d \r\n", esp_get_free_heap_size());
     delay_ms(delayTime);
   }
 }
@@ -1289,7 +1289,7 @@ void app_main()
 
 #endif
 
-
+#if 0
 //measure pwm frequency
 //author:Charlin
 //https://github.com/espressif/esp-idf/tree/master/examples/peripherals/gpio
@@ -1664,5 +1664,156 @@ void app_main()
 
     }
 }
+#endif
 
 
+#if 0
+//ds18b20 test
+/*
+   This is example for my DS18B20 library
+   https://github.com/feelfreelinux/ds18b20
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+#include <stdio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "string.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
+#include "ds18b20.h" //Include library
+const int DS_PIN = 3; //GPIO where you connected ds18b20
+
+void mainTask(void *pvParameters)
+{
+	float temp=0.0;
+	while (1)
+	{
+		if(ds18b20_init(DS_PIN))
+		{
+			temp=ds18b20_get_temp();
+			if(temp>-55&&temp<125)
+			printf("Temperature: %0.1f\n",temp);
+			else
+			{
+				printf("Error Temperature: %0.1f\n",temp);
+			}
+		}
+		else
+		{
+			printf("read Temperature fail\n");
+		}
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	}
+}
+void app_main()
+{
+    nvs_flash_init();
+    system_init();
+    xTaskCreatePinnedToCore(&mainTask, "mainTask", 2048, NULL, 5, NULL, 0);
+}
+
+#endif
+
+
+/* ADC1 Calibration
+%Calibrated function of the ADC reading
+%2017/12/07
+%Benjamin
+*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "driver/gpio.h"
+#include "driver/adc.h"
+#include "ds18b20.h" //Include library
+const int DS_PIN = 3; //GPIO where you connected ds18b20
+
+
+#define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)
+
+void adc1task(void* arg)
+{
+	float adc_read=0.;
+    // initialize ADC
+    adc1_config_width(ADC_WIDTH_12Bit);
+    adc1_config_channel_atten(ADC1_TEST_CHANNEL, ADC_ATTEN_11db);
+    while(1)
+    {
+		//adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)*0.985)+217.2);
+		adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)));//3.3V  ~  2^12=4096
+        printf("adc %f\n",adc_read);
+#if 1  //OK
+		if(ds18b20_init(DS_PIN))
+		{
+			uint8_t sn[8];
+			ds18b20_getROM(sn);
+			printf("ROM:");
+			for(int i=0;i<8;i++)
+			{
+				printf("%.2X ",sn[i]);  //ROM:28 D0 CA 5B 06 00 00 D8
+			}
+			printf("\n");
+			float temp=ds18b20_get_temp();
+			if(temp>-55&&temp<125)
+			printf("Temperature: %0.1fC\n",temp);
+			else
+			{
+				printf("Error Temperature: %0.1f\n",temp);
+			}
+		}
+		else
+		{
+			printf("read Temperature fail\n");
+		}
+#endif
+
+#if 0	//多点测温
+		//MAXNUM在ds18b20.h中定义
+		uint8_t ID_Buff[MAXNUM][8];
+		int i=0;
+		if(ds18b20_init(DS_PIN))
+		{
+			uint8_t num =ds18b20_searchROM(ID_Buff,MAXNUM);
+		    printf("总线上挂载的DS18B20数量为: %d\r\n",MAXNUM);
+		    printf("搜索到的DS18B20数量为: %d\r\n",num);
+		    for(i = 0;i < num;i ++)
+		    {
+		        printf("\r\n DS18B20 No%d ID: ",i);
+		        for(int j = 0;j < 8;j ++)
+		        {
+		            printf("%02X ",ID_Buff[i][j]);
+		        }
+		    }
+		    float Temp = ds18b20_aim_get_temp(ID_Buff[i++]);
+		    printf("\r\n 第%d个DS18B20温度为:%.2fC",i,Temp);
+		    if(i == num)
+		    {
+		         i = 0;
+		         printf("\r\n");
+		    }
+		}
+#endif
+
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+    }
+}
+
+void app_main()
+{
+	printf("start calibration\n");
+    xTaskCreate(adc1task, "adc1task", 1024*3, NULL, 10, NULL);
+}
