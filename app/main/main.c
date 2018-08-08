@@ -1742,8 +1742,16 @@ void app_main()
 #include "ds18b20.h" //Include library
 const int DS_PIN = 3; //GPIO where you connected ds18b20
 
+//ws2812 https://github.com/flo90/ESP32-WS2812B
+#include "ws2812b.h"
+#include "driver/rmt.h"
+#define WS2812_PIN	13   //IO13
+#define RMT_TX_CHANNEL 	RMT_CHANNEL_0
+const uint32_t pixel_count = 8; // Number of your "pixels"
+wsRGB_t *pixels;
+wsRGB_t color;
 
-#define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)
+#define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)  //IO33
 
 void adc1task(void* arg)
 {
@@ -1751,12 +1759,23 @@ void adc1task(void* arg)
     // initialize ADC
     adc1_config_width(ADC_WIDTH_12Bit);
     adc1_config_channel_atten(ADC1_TEST_CHANNEL, ADC_ATTEN_11db);
+
+    WS2812B_init(RMT_TX_CHANNEL,WS2812_PIN,pixel_count);
+
+    pixels = malloc(sizeof(wsRGB_t) * pixel_count);
+    color.r=255;color.g=255;color.b=255;
+    for (uint8_t i = 0; i < pixel_count; i++)
+    {
+      pixels[i] = color;
+    }
+    WS2812B_setLeds(pixels,pixel_count);
+
     while(1)
     {
 		//adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)*0.985)+217.2);
-		adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)));//3.3V  ~  2^12=4096
-        printf("adc %f\n",adc_read);
-#if 1  //OK
+		adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)));//3.9V  ~  2^12=4096
+        printf("adc %f\n",(adc_read*3.9)/4096);
+#if 1 //OK
 		if(ds18b20_init(DS_PIN))
 		{
 			uint8_t sn[8];
@@ -1782,6 +1801,7 @@ void adc1task(void* arg)
 #endif
 
 #if 0	//多点测温
+
 		//MAXNUM在ds18b20.h中定义
 		uint8_t ID_Buff[MAXNUM][8];
 		int i=0;
@@ -1807,7 +1827,38 @@ void adc1task(void* arg)
 		    }
 		}
 #endif
+        vTaskDelay(1000/portTICK_PERIOD_MS);
 
+        color.r=255;color.g=0;color.b=0;
+        for (uint8_t i = 0; i < pixel_count; i++)
+        {
+          pixels[i] = color;
+        }
+        WS2812B_setLeds(pixels,pixel_count);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+
+        color.r=0;color.g=255;color.b=0;
+        for (uint8_t i = 0; i < pixel_count; i++)
+        {
+          pixels[i] = color;
+        }
+        WS2812B_setLeds(pixels,pixel_count);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+
+        color.r=0;color.g=0;color.b=255;
+        for (uint8_t i = 0; i < pixel_count; i++)
+        {
+          pixels[i] = color;
+        }
+        WS2812B_setLeds(pixels,pixel_count);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+
+        color.r=0;color.g=0;color.b=0;
+        for (uint8_t i = 0; i < pixel_count; i++)
+        {
+          pixels[i] = color;
+        }
+        WS2812B_setLeds(pixels,pixel_count);
         vTaskDelay(1000/portTICK_PERIOD_MS);
     }
 }
@@ -1817,3 +1868,4 @@ void app_main()
 	printf("start calibration\n");
     xTaskCreate(adc1task, "adc1task", 1024*3, NULL, 10, NULL);
 }
+
