@@ -1747,9 +1747,112 @@ const int DS_PIN = 3; //GPIO where you connected ds18b20
 #include "driver/rmt.h"
 #define WS2812_PIN	13   //IO13
 #define RMT_TX_CHANNEL 	RMT_CHANNEL_0
-const uint32_t pixel_count = 8; // Number of your "pixels"
+const uint32_t pixel_count = 10; // Number of your "pixels"
 wsRGB_t *pixels;
 wsRGB_t color;
+
+unsigned char PWM_TABLE[11]=
+{
+	0,
+	2,
+	3,
+	5,
+	9,
+	16,
+	28,
+	48,
+	84,
+	147,
+	255
+};
+
+#define CONST_RESPIRATION_LAMP_SERIES 80
+unsigned char RESPIRATION_LAMP_TABLE[] =
+{
+    0,
+    0,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    6,
+    6,
+    6,
+    7,
+    7,
+    8,
+    9,
+    9,
+    10,
+    11,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    20,
+    21,
+    23,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34,
+    37,
+    39,
+    42,
+    45,
+    48,
+    52,
+    56,
+    60,
+    64,
+    68,
+    73,
+    79,
+    84,
+    90,
+    97,
+    104,
+    111,
+    119,
+    128,
+    137,
+    147,
+    157,
+    168,
+    180,
+    193,
+    207,
+    222,
+    238,
+    255,
+    255
+};
+
+
 
 #define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)  //IO33
 
@@ -1828,7 +1931,7 @@ void adc1task(void* arg)
 		}
 #endif
         vTaskDelay(1000/portTICK_PERIOD_MS);
-
+#if 0
         color.r=255;color.g=0;color.b=0;
         for (uint8_t i = 0; i < pixel_count; i++)
         {
@@ -1860,6 +1963,61 @@ void adc1task(void* arg)
         }
         WS2812B_setLeds(pixels,pixel_count);
         vTaskDelay(1000/portTICK_PERIOD_MS);
+#endif
+        //pulsing LED/pulsing rhythm/breathing LED
+        for(int i=1;i<CONST_RESPIRATION_LAMP_SERIES-20;i++)
+        {
+            color.r=0;color.g=RESPIRATION_LAMP_TABLE[i];color.b=0;
+            for (uint8_t i = 0; i < pixel_count; i++)
+            {
+              pixels[i] = color;
+            }
+            WS2812B_setLeds(pixels,pixel_count);
+            ets_delay_us(20000);//15ms  //18
+        }
+
+        for(int i=CONST_RESPIRATION_LAMP_SERIES-20;i>0;i--)
+        {
+            color.r=0;color.g=RESPIRATION_LAMP_TABLE[i];color.b=0;
+            for (uint8_t i = 0; i < pixel_count; i++)
+            {
+              pixels[i] = color;
+            }
+            WS2812B_setLeds(pixels,pixel_count);
+            ets_delay_us(20000);//15ms
+        }
+
+        color.r=0;color.g=0;color.b=0;
+        for (uint8_t i = 1; i < pixel_count; i++)
+        {
+            pixels[i] = color;
+        }
+        WS2812B_setLeds(pixels,pixel_count);
+        ets_delay_us(100000);//100ms
+
+
+
+        for (uint8_t i = 1; i < pixel_count; i++)
+        {
+        	color.r=0;color.g=0;color.b=PWM_TABLE[i];
+            pixels[i] = color;
+            WS2812B_setLeds(pixels,i);
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+        }
+        for (uint8_t i = 1; i < pixel_count; i++)
+        {
+        	color.r=PWM_TABLE[i];color.g=0;color.b=0;
+            pixels[i] = color;
+            WS2812B_setLeds(pixels,i);
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+        }
+        for (uint8_t i = 1; i < pixel_count; i++)
+        {
+        	color.r=0;color.g=PWM_TABLE[i];color.b=0;
+            pixels[i] = color;
+            WS2812B_setLeds(pixels,i);
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+        }
     }
 }
 

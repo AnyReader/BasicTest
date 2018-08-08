@@ -39,8 +39,8 @@ static const rmt_item32_t wsLogicOne = {.level0 = 1, .duration0 = 109, .level1 =
 #else
 #if CONFIG_WS2812B_USE_PL9823 == 0
 //not inverting   gpio>------> to LED     tested with 8 x WS2812B LED's OK.
-static const rmt_item32_t wsLogicOne = {.level0 = 0, .duration0 = 32, .level1 = 1, .duration1 = 68};//示波器实测   32-400ns  68-860ns
-static const rmt_item32_t wsLogicZero = {.level0 = 0, .duration0 = 64, .level1 = 1, .duration1 = 36};//示波器实测  64 - 800ns  36-460ns
+static const rmt_item32_t wsLogicOne = {.level0 = 0, .duration0 = 32, .level1 = 1, .duration1 = 64};//示波器实测   32-400ns  68-860ns
+static const rmt_item32_t wsLogicZero = {.level0 = 0, .duration0 = 64, .level1 = 1, .duration1 = 32};//示波器实测  64 - 800ns  36-460ns
 /**Level shifter (inverting)
  *       ^ 5V
          |
@@ -109,7 +109,7 @@ void WS2812B_init(rmt_channel_t chan, gpio_num_t gpio, unsigned int psize)
 void WS2812B_setLeds(wsRGB_t* data, unsigned int size)
 {
 	unsigned int itemCnt = 0;
-
+	if(size<0) return;//add by Charlin
 	for(int i = 0; i < size; i++)
 		for(int j = 0; j < 24; j++)
 		{
