@@ -9,7 +9,7 @@
 #include "i2sdac.h"
 
 #define SAMPLE_RATE     (44100)
-#define I2S_NUM         I2S_NUM_0
+#define I2S_NUM         I2S_NUM_1
 #define DMA_BUF_COUNT	14
 #define DMA_BUF_LEN	(32*4)
 

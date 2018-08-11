@@ -1289,6 +1289,8 @@ void app_main()
 
 #endif
 
+
+
 #if 0
 //measure pwm frequency
 //author:Charlin
@@ -1315,9 +1317,9 @@ void app_main()
 #include "soc/timer_group_struct.h"
 #include "driver/periph_ctrl.h"
 #include "driver/timer.h"
-#include "esp_system.h"
 #include "sys/time.h"
-#include "stdint.h"
+#include "esp_system.h"
+
 
 /**
  * Brief:
@@ -1347,13 +1349,12 @@ void app_main()
 static xQueueHandle gpio_evt_queue = NULL;
 
 unsigned int pwmCount=0;
-int getTime=0;
-int64_t current_time;
-static int64_t last_time = 0;
+uint64_t timeValue=0;
 
-int64_t current_time;
+uint64_t currentTime;
+uint64_t nextTime;
 
-struct timeval system_time;
+uint64_t minusTime;
 
 struct timeval tv1, tv2;
 uint64_t t1;
@@ -1369,56 +1370,36 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     uint32_t gpio_num = (uint32_t) arg;
     if(gpio_num == GPIO_INPUT_IO_1 )
     {
+    	pwmCount++;
     	if(pwmCount==1)
     	{
-    		/* 获取此时的时间 */
-        	gettimeofday(&system_time,NULL);
-        	/* 转换成ms */
-        	//current_time = system_time.tv_usec*1000+(system_time.tv_sec/1000);
-
-        	//printf("currentTime %llu",current_time);  //reboot why
-
-            gettimeofday(&tv1, NULL);
-            //gettimeofday(&tv2, NULL);
-            t1 = timeval_to_usec(&tv1);
-
+    		 gettimeofday(&tv1, NULL);
+    		 t1 = timeval_to_usec(&tv1);
     	}
-    	pwmCount++;
-    	if(pwmCount>=1001)
+    	else if(pwmCount>=1001)
     	{
-    		//gettimeofday(&system_time,NULL);
-    		//last_time = system_time.tv_usec*1000+(system_time.tv_sec/1000);
-
-    		//f=(last_time-current_time)/1000  that is  T=1000/((last_time-current_time))
-    		//C=T*1.443/(R1 + 2*R2)  = 1443.0/((last_time-current_time)*104.0)
-    		//uint32_t getTime= (last_time-current_time);
-    		//printf("currentTime %d",getTime);
-    		//printf("======Capacity : %.8f F,Timevalue=%.9d ------\n", (double) ((double)1443.0/(getTime*104.0)),getTime); // //reboot why
-
     		gettimeofday(&tv2, NULL);
     		t2 = timeval_to_usec(&tv2);
-
     		pwmCount=0;
-    		 xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+    		xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
     	}
-
     }
 
 
+   //
 }
+
 
 static void gpio_task_example(void* arg)
 {
     uint32_t io_num;
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            printf("GPIO[%d] intr, val: %d/%d \n", io_num, gpio_get_level(io_num),pwmCount);
-
+            //printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
     		printf("t1=%lld t2=%lld t2-t1=%lld\r\n", t1, t2, t2 - t1);
     		uint64_t  t=(double)(t2 - t1)/1000.0;
-    		printf("-----Capacity : %.9f uF ------\n", (double)t/(double)(0.693*104000));
-           // printf("==Counter: 0x%08x%08x\n", (uint32_t) (current_time >> 32), (uint32_t) (current_time));
-           // printf("--Counter: 0x%08x%08x\n", (uint32_t) (last_time >> 32),(uint32_t) (last_time));
+    		if(t>1000)
+    		printf("-----Capacity : %.9f uF ------\n", (double)t/(double)(0.693*104000));//c= t*k
         }
     }
 }
@@ -1538,10 +1519,6 @@ static void example_tg0_timer_init(int timer_idx,
     timer_start(TIMER_GROUP_0, timer_idx);
 }
 
-
-#define _555_R1  10000  //10kohm
-#define _555_R2  47000	//47Kohm
-#define _555_C  0.0000001  //0.1uf
 /*
  * The main task of this example program
  */
@@ -1557,10 +1534,8 @@ static void timer_example_evt_task(void *arg)
             if(pwmCount)
             {
             	printf("-----Frequency : %.8f Hz,pwmCount=%d ------\n", (double) ((double)pwmCount/(TIMER_INTERVAL0_SEC)),pwmCount);
-            	printf("-----Capacity : %.8f F ------\n", (double) (((double)1.443*TIMER_INTERVAL0_SEC/(double)pwmCount)/104000.0));
-            	//c=1.443/(f*(R13+2*R14))   F = 1.44 / ( (R1 + 2R2) * C)    T=( (R1 + 2R2) * C)  /1.443  C=T*1.443/(R1 + 2*R2)
-            	//R13=10K R14=47K   C=(TIMER_INTERVAL0_SEC)*1.443/((_555_R1 + 2*_555_R2)*(double)pwmCount)
-            	pwmCount=0;
+            	printf("-----Capacity : %.8fuF ------\n", (double) (((double)14.43*TIMER_INTERVAL0_SEC/(double)pwmCount)/1.04));
+            	//pwmCount=0;
             }
 
         } else if (evt.type == TEST_WITH_RELOAD) {
@@ -1583,7 +1558,6 @@ static void timer_example_evt_task(void *arg)
 
     }
 }
-
 
 
 
@@ -1642,9 +1616,6 @@ void app_main()
     gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
 
     int cnt = 0;
-
-
-
     while(1) {
         //printf("cnt: %d\n", cnt++);
         cnt++;
@@ -1653,107 +1624,357 @@ void app_main()
         //vTaskDelay(1000 / portTICK_RATE_MS);//示波器实测1Hz  1s
         gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
         gpio_set_level(GPIO_OUTPUT_IO_1, cnt % 2);
-#if 0
-        struct timeval tv1, tv2;
-        gettimeofday(&tv1, NULL);
-        gettimeofday(&tv2, NULL);
-        uint64_t t1 = timeval_to_usec(&tv1);
-        uint64_t t2 = timeval_to_usec(&tv2);
-        printf("t1=%lld t2=%lld t2-t1=%lld\r\n", t1, t2, t2 - t1);  //1000000us
+    }
+}
+
 #endif
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <byteswap.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
+
+#include "driver/uart.h"
+
+//#include "esp_task_wdt.h"
+
+#include "cjson.h"
+#include "driver/timer.h"
+
+#include "limits.h"
+#include "esp_log.h"
+
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_task_wdt.h"  //watchdog
+#include "esp_event_loop.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "soc/spi_reg.h"
+#include "driver/hspi.h"
+#include "soc/gpio_reg.h"
+#include "esp_attr.h"
+
+#include "soc/gpio_struct.h"
+#include "freertos/semphr.h"
+#include "esp_err.h"
+
+#include "lwip/sys.h"
+#include "lwip/netdb.h"
+#include "lwip/api.h"
+#include "driver/adc.h"
+
+
+#define	 WIFI_SSID 	    "dong_zhang"//"ChinaMobile"//"dong_zhang"//////CONFIG_WIFI_SSID
+#define	 WIFI_PASSWORD	 "qiangying"//"{85208520}"//"qiangying"//////CONFIG_WIFI_PASSWORD
+#define	 srcMAC		"B4-E6-2D-B8-3C-F5"//steven//"30-AE-A4-43-86-60"//"A4-E9-75-3D-DC-DF"//"B4-E6-2D-B8-3C-F5"
+static char	 strMac[15];
+static uint8_t wifiMac[6];
+//tcp
+int g_iSock_fd;
+#define SERVER_IP  		"39.106.151.85"//"192.168.1.103"//
+#define REMOTE_PORT		8088
+uint32_t port=8086;
+
+//#include "spiram.h"
+#define ESPDHT11	0  //DHT11与DS18B20 不共存  能否先测量DHT11再测量湿度？
+#if ESPDHT11
+  #include "dht11.h"
+#define DHT_GPIO 3
+	uint8_t dhtData[4];
+#endif
+
+#define ADCENABLE  0  //通过ADC测量与通过电容测试不共存
+#if (ADCENABLE==1)
+#include "driver/adc.h"
+
+#define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)  //io33   get Humidity via adc
+#endif
+
+
+#define		capHumidity		1//measure Humidity via capacity
+#if (capHumidity==1)
+
+#define GPIO_INPUT_IO_0     0
+#define GPIO_INPUT_IO_1     33
+#define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1))
+#define ESP_INTR_FLAG_DEFAULT 0
+
+#define _555_R1 10000  //10K
+#define _555_R2 47000  //47K
+#define _555_Rsum    (_555_R1+2*_555_R2)
+
+static xQueueHandle gpio_evt_queue = NULL;
+
+double capacity=0.0f;
+unsigned int pwmCount=0;
+uint64_t timeValue=0;
+
+uint64_t currentTime;
+uint64_t nextTime;
+
+uint64_t minusTime;
+
+struct timeval tv1, tv2;
+uint64_t t1;
+uint64_t t2;
+
+static inline uint64_t timeval_to_usec(struct timeval* tv)
+{
+    return 1000000LL * tv->tv_sec + tv->tv_usec;
+}
+
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    if(gpio_num == GPIO_INPUT_IO_1 )
+    {
+    	pwmCount++;
+    	if(pwmCount==1)
+    	{
+    		gettimeofday(&tv1, NULL);
+    		t1 = timeval_to_usec(&tv1);
+    	}
+    	else if(pwmCount>=1001)//测量1000个脉冲 占用多少时间
+    	{
+    		gettimeofday(&tv2, NULL);
+    		t2 = timeval_to_usec(&tv2);
+    		pwmCount=0;
+    	    //remove isr handler for gpio number.
+    	    gpio_isr_handler_remove(GPIO_INPUT_IO_1);
+    		xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+    	}
+    }
+    else if(gpio_num == GPIO_INPUT_IO_0 )
+    {
 
     }
 }
-#endif
 
 
-#if 0
-//ds18b20 test
-/*
-   This is example for my DS18B20 library
-   https://github.com/feelfreelinux/ds18b20
 
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
+static void gpio_task_example(void* arg)
+{
+    uint32_t io_num;
+    for(;;)
+    {
 
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "string.h"
-#include "esp_system.h"
-#include "nvs_flash.h"
+        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
+        {
+            printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+    		printf("t1=%lld t2=%lld t2-t1=%lld\r\n", t1, t2, t2 - t1);
+    		uint64_t  t=(double)(t2 - t1)/1000.0; //unit: us // T = [ C( R1 + 2 R2) ln2) ]   ==> C = T/[( R1 + 2 R2) ln2]
+    		//if(t>100)
+    		{
+    			capacity=1000000.0 *(double)t/(double)(0.693*_555_Rsum);  //unit: pF
+    			printf("-----Capacity : %.9fpF ------\n", capacity);//c= t*k
+    		    //hook isr handler for specific gpio pin again
+    		    gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
+    		}
+
+        }
+
+    }
+}
+
+#endif //end of capHumidity
+
+#define ESPDS18B20	0
+#if ESPDS18B20==1
 #include "ds18b20.h" //Include library
 const int DS_PIN = 3; //GPIO where you connected ds18b20
 
-void mainTask(void *pvParameters)
+uint8_t dsROM[8][5]=
 {
-	float temp=0.0;
-	while (1)
-	{
-		if(ds18b20_init(DS_PIN))
-		{
-			temp=ds18b20_get_temp();
-			if(temp>-55&&temp<125)
-			printf("Temperature: %0.1f\n",temp);
-			else
-			{
-				printf("Error Temperature: %0.1f\n",temp);
-			}
-		}
-		else
-		{
-			printf("read Temperature fail\n");
-		}
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
-	}
-}
-void app_main()
-{
-    nvs_flash_init();
-    system_init();
-    xTaskCreatePinnedToCore(&mainTask, "mainTask", 2048, NULL, 5, NULL, 0);
-}
+	{0x28, 0xFF ,0x8E ,0x4D ,0xA2 ,0x16 ,0x05 ,0x9C},
+	{0x28, 0xFF ,0x8E ,0x4D ,0xA2 ,0x16 ,0x05 ,0x9C},
+	{0x28, 0xFF ,0x8E ,0x4D ,0xA2 ,0x16 ,0x05 ,0x9C},
+	{0x28, 0xFF ,0x8E ,0x4D ,0xA2 ,0x16 ,0x05 ,0x9C},
+	{0x28, 0xFF ,0x8E ,0x4D ,0xA2 ,0x16 ,0x05 ,0x9C}
+};
+#endif
 
+#define ESPIDFV21RC 1
+
+#define BTENABLE		0
+
+#if BTENABLE
+//bt start
+#include "bt.h"
+#include "bt_app_core.h"
+#include "bt_app_av.h"
+#include "esp_bt_main.h"
+#include "esp_bt_device.h"
+#include "esp_gap_bt_api.h"
+#include "esp_a2dp_api.h"
+#include "esp_avrc_api.h"
+#include "i2sdac.h"
+
+/* event for handler "bt_av_hdl_stack_up */
+enum {
+    BT_APP_EVT_STACK_UP = 0,
+};
+
+/* handler for bluetooth stack enabled events */
+static void bt_av_hdl_stack_evt(uint16_t event, void *p_param);
+
+static void bt_av_hdl_stack_evt(uint16_t event, void *p_param)
+{
+  ESP_LOGD(BT_AV_TAG, "%s evt %d", __func__, event);
+  switch (event) {
+  case BT_APP_EVT_STACK_UP: {
+    /* set up device name */
+    char *dev_name = "GreenBox";
+    esp_bt_dev_set_device_name(dev_name);
+
+    /* initialize A2DP sink */
+    esp_a2d_register_callback(&bt_app_a2d_cb);
+    esp_a2d_register_data_callback(bt_app_a2d_data_cb);
+    esp_a2d_sink_init();
+
+    /* initialize AVRCP controller */
+    esp_avrc_ct_init();
+    esp_avrc_ct_register_callback(bt_app_rc_ct_cb);
+
+    /* set discoverable and connectable mode, wait to be connected */
+    esp_bt_gap_set_scan_mode(ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
+    break;
+  }
+  default:
+    ESP_LOGE(BT_AV_TAG, "%s unhandled evt %d", __func__, event);
+    break;
+  }
+}
+//bt end
 #endif
 
 
-/* ADC1 Calibration
-%Calibrated function of the ADC reading
-%2017/12/07
-%Benjamin
-*/
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
-#include "driver/gpio.h"
-#include "driver/adc.h"
-#include "ds18b20.h" //Include library
-const int DS_PIN = 3; //GPIO where you connected ds18b20
 
-//ws2812 https://github.com/flo90/ESP32-WS2812B
-#include "ws2812b.h"
-#include "driver/rmt.h"
-#define WS2812_PIN	13   //IO13
-#define RMT_TX_CHANNEL 	RMT_CHANNEL_0
-const uint32_t pixel_count = 10; // Number of your "pixels"
+#if ESPIDFV21RC
+  #include "esp_heap_alloc_caps.h"
+#else
+  #include "esp_heap_alloc_caps.h"
+  #include "esp_heap_caps.h"
+#endif
+
+
+
+size_t free8start=0, free32start=0, free8=0, free32=0;
+
+static const char* TAG = "ESP-CAM";
+
+void tcp_server_task(void* arg);
+static void tcp_cli_task(void *pvParameters);
+
+//=======================================================================
+
+uint8_t colorR=0,colorG=0,colorB=255;
+uint8_t brightValue=10;
+
+uint8_t nurseMode=0;//护理模式
+typedef enum
+{
+	manual				=	0,	//手动护理
+	semiAutomatic		=	1,	//半自动护理
+	automatic			=	2,	//自动护理
+	customized			=	3,	//自定义护理
+	aiMode				=	4,	//人工智能护理
+	undefined			=	5		//未定义
+}runMode;
+
+uint8_t ledMode=0;//Led模式 显示效果
+
+
+uint8_t setHumidity,getHumidity;//0~100%
+uint8_t setTemp,getTemp;//10~40C
+#define setTempMax 40
+#define setTempMin 10
+uint16_t getIllum=0;
+
+uint8_t boolValue;//几个布尔状态值
+//BIT0:LED开关
+//BIT1:Fan开关
+//BIT2:PUMP开关(水泵开关)
+//BIT3:Audio开关
+//BIT4:Live开关（活体检测开关）
+//BIT5:Heater开关
+//BIT6:PUMP开关(气泵开关)
+
+//uint8_t ledModel=0;
+
+
+
+//start of CAMENABLE
+#define CAMENABLE	1
+#if (CAMENABLE==1)
+//Warning: This gets squeezed into IRAM.
+volatile static uint32_t *currFbPtr __attribute__ ((aligned(4))) = NULL;
+
+#endif
+//end of CAMENABLE
+
+
+//
+#define ESPBH1750	1  //start of BH1750
+#if ESPBH1750==1
+  #include "bh1750.h"
+#define I2C_SDA 14
+#define I2C_SCL 27
+#endif  //end of BH1750
+
+
+//relay
+#define RELAY_0_IO_NUM   	15	//
+#define RELAY_1_IO_NUM		12	//io12  test ok
+
+#define close_relay_0()		gpio_set_level(RELAY_0_IO_NUM, 0)
+#define open_relay_0()		gpio_set_level(RELAY_0_IO_NUM, 1)
+
+#define close_relay_1()		gpio_set_level(RELAY_1_IO_NUM, 0)   //
+#define open_relay_1()		gpio_set_level(RELAY_1_IO_NUM, 1)  //test ok
+
+void gpioInit()
+{
+    gpio_pad_select_gpio(RELAY_0_IO_NUM);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(RELAY_0_IO_NUM , GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(RELAY_0_IO_NUM , GPIO_PULLDOWN_ONLY);
+    gpio_set_level(RELAY_0_IO_NUM, 1);
+
+    gpio_pad_select_gpio(RELAY_1_IO_NUM);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(RELAY_1_IO_NUM, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(RELAY_1_IO_NUM , GPIO_PULLDOWN_ONLY);
+    gpio_set_level(RELAY_1_IO_NUM, 0);
+
+}
+
+#define ESPWS2812	1
+
+//=======================================================================
+#if ESPWS2812==1 //(0)
+#include "ws2812.h" //Include library
+
+#define WS2812_PIN	13
+const uint8_t pixel_count = 66; // Number of your "pixels"
+wsRGB_t colorRGB;
 wsRGB_t *pixels;
-wsRGB_t color;
+#define RMT_TX_CHANNEL 	RMT_CHANNEL_0
+
+#define delay_ms(ms) vTaskDelay((ms) / portTICK_RATE_MS)
+
+xTaskHandle xHandleXDisplay=NULL;
 
 unsigned char PWM_TABLE[11]=
 {
-	0,
+	1,
 	2,
 	3,
 	5,
@@ -1769,8 +1990,8 @@ unsigned char PWM_TABLE[11]=
 #define CONST_RESPIRATION_LAMP_SERIES 80
 unsigned char RESPIRATION_LAMP_TABLE[] =
 {
-    0,
-    0,
+    1,
+    1,
     1,
     1,
     1,
@@ -1852,33 +2073,933 @@ unsigned char RESPIRATION_LAMP_TABLE[] =
     255
 };
 
-
-
-#define ADC1_TEST_CHANNEL (ADC1_CHANNEL_5)  //IO33
-
-void adc1task(void* arg)
+xTaskHandle xHandleLedDisplay = NULL;
+void rgbDisplay(void *pvParameters)
 {
-	float adc_read=0.;
-    // initialize ADC
-    adc1_config_width(ADC_WIDTH_12Bit);
-    adc1_config_channel_atten(ADC1_TEST_CHANNEL, ADC_ATTEN_11db);
 
-    WS2812B_init(RMT_TX_CHANNEL,WS2812_PIN,pixel_count);
+	while(1)
+	{
+		//esp_task_wdt_reset();
+		esp_task_wdt_feed();
+#if ESPWS2812==1
+    	if(ledMode==2)
+    	{
+    		//green
+    		//pulsing LED/pulsing rhythm/breathing LED
+    		for(int i=0;i<CONST_RESPIRATION_LAMP_SERIES-20;i++)
+    		{
+    			colorRGB.r=0;colorRGB.g=RESPIRATION_LAMP_TABLE[i];colorRGB.b=0;
+    			for (uint8_t i = 0; i < pixel_count; i++)
+    			{
+    				pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms  //18
+    		}
 
-    pixels = malloc(sizeof(wsRGB_t) * pixel_count);
-    color.r=255;color.g=255;color.b=255;
-    for (uint8_t i = 0; i < pixel_count; i++)
+    		for(int i=CONST_RESPIRATION_LAMP_SERIES-20;i>0;i--)
+    		{
+    			colorRGB.r=0;colorRGB.g=RESPIRATION_LAMP_TABLE[i];colorRGB.b=0;
+    			for (uint8_t i = 0; i < pixel_count; i++)
+    			{
+    		           pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms
+    		}
+
+    		colorRGB.r=0;colorRGB.g=0;colorRGB.b=0;
+    		for (uint8_t i = 0; i < pixel_count; i++)
+    		{
+    			pixels[i] = colorRGB;
+    		}
+    		WS2812B_setLeds(pixels,pixel_count);
+    		ets_delay_us(100000);//100ms
+
+    		//blue
+    		//pulsing LED/pulsing rhythm/breathing LED
+    		for(int i=0;i<CONST_RESPIRATION_LAMP_SERIES-20;i++)
+    		{
+    			colorRGB.r=0;colorRGB.g=0;colorRGB.b=RESPIRATION_LAMP_TABLE[i];
+    			for (uint8_t i = 1; i < pixel_count; i++)
+    			{
+    				pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms  //18
+    		}
+
+    		for(int i=CONST_RESPIRATION_LAMP_SERIES-20;i>0;i--)
+    		{
+    			colorRGB.r=0;colorRGB.g=0;colorRGB.b=RESPIRATION_LAMP_TABLE[i];
+    			for (uint8_t i = 0; i < pixel_count; i++)
+    			{
+    		           pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms
+    		}
+
+    		colorRGB.r=0;colorRGB.g=0;colorRGB.b=0;
+    		for (uint8_t i = 0; i < pixel_count; i++)
+    		{
+    			pixels[i] = colorRGB;
+    		}
+    		WS2812B_setLeds(pixels,pixel_count);
+    		ets_delay_us(100000);//100ms
+//red
+    		for(int i=0;i<CONST_RESPIRATION_LAMP_SERIES-20;i++)
+    		{
+    			colorRGB.r=RESPIRATION_LAMP_TABLE[i];colorRGB.g=0;colorRGB.b=0;
+    			for (uint8_t i = 1; i < pixel_count; i++)
+    			{
+    				pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms  //18
+    		}
+
+    		for(int i=CONST_RESPIRATION_LAMP_SERIES-20;i>0;i--)
+    		{
+    			colorRGB.r=RESPIRATION_LAMP_TABLE[i];colorRGB.g=0;colorRGB.b=0;
+    			for (uint8_t i = 0; i < pixel_count; i++)
+    			{
+    		           pixels[i] = colorRGB;
+    			}
+    			WS2812B_setLeds(pixels,pixel_count);
+    			ets_delay_us(20000);//15ms
+    		}
+
+    		colorRGB.r=0;colorRGB.g=0;colorRGB.b=0;
+    		for (uint8_t i = 0; i < pixel_count; i++)
+    		{
+    			pixels[i] = colorRGB;
+    		}
+    		WS2812B_setLeds(pixels,pixel_count);
+    		ets_delay_us(100000);//100ms
+    	}
+    	else if(ledMode==3) //flow LED
+    	{
+    		for (uint8_t i = 0; i < pixel_count; i++)
+    		{
+    		    colorRGB.r=0;colorRGB.g=0;colorRGB.b=PWM_TABLE[10];
+    		    pixels[i] = colorRGB;
+    		    WS2812B_setLeds(pixels,i);
+    		    vTaskDelay(500/portTICK_PERIOD_MS);
+    		}
+    		for (uint8_t i = 0; i < pixel_count; i++)
+    		{
+    		     colorRGB.r=PWM_TABLE[10];colorRGB.g=0;colorRGB.b=0;
+    		     pixels[i] = colorRGB;
+    		     WS2812B_setLeds(pixels,i);
+    		     vTaskDelay(500/portTICK_PERIOD_MS);
+    		 }
+    		 for (uint8_t i = 0; i < pixel_count; i++)
+    		 {
+    		     colorRGB.r=0;colorRGB.g=PWM_TABLE[10];colorRGB.b=0;
+    		     pixels[i] = colorRGB;
+    		     WS2812B_setLeds(pixels,i);
+    		     vTaskDelay(500/portTICK_PERIOD_MS);
+    		 }
+    		 for (uint8_t i = 0; i < pixel_count; i++)
+    		 {
+    		     colorRGB.r=PWM_TABLE[10];colorRGB.g=PWM_TABLE[10];colorRGB.b=0;
+    		     pixels[i] = colorRGB;
+    		     WS2812B_setLeds(pixels,i);
+    		     vTaskDelay(500/portTICK_PERIOD_MS);
+    		 }
+    		 for (uint8_t i = 0; i < pixel_count; i++)
+    		 {
+    		     colorRGB.r=0;colorRGB.g=PWM_TABLE[10];colorRGB.b=PWM_TABLE[10];
+    		     pixels[i] = colorRGB;
+    		     WS2812B_setLeds(pixels,i);
+    		     vTaskDelay(500/portTICK_PERIOD_MS);
+    		 }
+    		 for (uint8_t i = 0; i < pixel_count; i++)
+    		 {
+    		     colorRGB.r=160;colorRGB.g=32;colorRGB.b=240;
+    		     pixels[i] = colorRGB;
+    		     WS2812B_setLeds(pixels,i);
+    		     vTaskDelay(500/portTICK_PERIOD_MS);
+    		 }
+
+    	}
+#endif
+	}
+}
+
+#endif  //end of  ESPWS2812 //(0)
+
+
+
+static void socket_deinit()
+{
+   // close(g_iSock_fd);
+	if(g_iSock_fd>=0)
+    closesocket(g_iSock_fd);
+    g_iSock_fd = g_iSock_fd -1;
+    port++;
+}
+
+
+static void socket_init()
+{
+#if 1
+//    struct addrinfo *res;
+    int err;
+    struct sockaddr_in saddr;// = { 0 };
+
+ //   tcpip_adapter_init();
+
+   // err = getaddrinfo("localhost", "80", &hints, &res);
+
+//    if (err != 0 || res == NULL) {
+//        printf("DNS lookup failed: %d", errno);
+//        return;
+//    }
+
+SOCKBEGIN:
+	if(g_iSock_fd>=0)
+	{
+		do
+		{
+			socket_deinit();
+		}while(g_iSock_fd>=0);
+	}
+
+do{
+    g_iSock_fd =  socket(AF_INET, SOCK_STREAM, 0);//socket(res->ai_family, res->ai_socktype, 0);
+
+    if (g_iSock_fd < 0)
     {
-      pixels[i] = color;
+    	printf( "Failed to allocate socket %d.\r\n",errno);//Failed to allocate socket 23.
+    	socket_deinit();
+      //  freeaddrinfo(res);
+        vTaskDelay(500 /portTICK_RATE_MS);
+        //goto SOCKBEGIN;
+        //return;
     }
-    WS2812B_setLeds(pixels,pixel_count);
+}while(g_iSock_fd < 0);
 
+#if 1 //bind local port
+do{
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(port);//htons(8086);
+    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    err = bind(g_iSock_fd, (struct sockaddr *) &saddr, sizeof(struct sockaddr_in));
+    if (err < 0)
+    {
+    	printf("Failed to bind socket %d\r\n",errno); //Failed to bind socket 98
+        //freeaddrinfo(res);
+        socket_deinit();
+        vTaskDelay(500 /portTICK_RATE_MS);
+        //goto SOCKBEGIN;
+        //return;
+    }
+}while(err < 0);
+#endif
+
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_addr.s_addr =inet_addr(SERVER_IP);
+    saddr.sin_port = htons(REMOTE_PORT);
+
+do{
+	err=connect(g_iSock_fd, (struct sockaddr *)&saddr, sizeof(struct sockaddr));
+    if (err!= 0)
+    {// err=connect(g_iSock_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr));
+    	printf("Socket connection failed: %d\r\n", errno);//Socket connection failed: 104
+    	socket_deinit();
+      //  freeaddrinfo(res);
+
+        vTaskDelay(500 /portTICK_RATE_MS);
+        goto SOCKBEGIN;
+        //return;
+    }
+}while(err!=0);
+//    freeaddrinfo(res);
+#endif
+    printf("connect server success %d/%d....\r\n",err,g_iSock_fd);//0 0
+
+}
+
+
+
+#if(ESPWS2812==1)
+/**
+void rainbow(void *pvParameters)
+{
+  const uint8_t anim_step = 10;
+  const uint8_t anim_max = 255;//oringin is 250 change to 255 by Charlin
+//  const uint32_t pixel_count = 66; // Number of your "pixels"
+  const uint8_t delayTime = 25; // duration between color changes
+  rgbVal color = makeRGBVal(anim_max, 0, 0);
+  uint8_t step = 0;
+  rgbVal color2 = makeRGBVal(anim_max, 0, 0);
+  uint8_t step2 = 0;
+  rgbVal *pixels;
+
+  pixels = malloc(sizeof(rgbVal) * pixel_count);
+
+  while (1) {
+    color = color2;
+    step = step2;
+
+    for (uint8_t i = 0; i < pixel_count; i++) {
+      pixels[i] = color;
+
+      if (i == 1) {
+        color2 = color;
+        step2 = step;
+      }
+
+      switch (step) {
+      case 0:
+        color.g += anim_step;
+        if (color.g >= anim_max)
+          step++;
+        break;
+      case 1:
+        color.r -= anim_step;
+        if (color.r == 0)
+          step++;
+        break;
+      case 2:
+        color.b += anim_step;
+        if (color.b >= anim_max)
+          step++;
+        break;
+      case 3:
+        color.g -= anim_step;
+        if (color.g == 0)
+          step++;
+        break;
+      case 4:
+        color.r += anim_step;
+        if (color.r >= anim_max)
+          step++;
+        break;
+      case 5:
+        color.b -= anim_step;
+        if (color.b == 0)
+          step = 0;
+        break;
+      }
+    }
+
+    ws2812_setColors(pixel_count, pixels);
+    //printf("free mem=%d \r\n", esp_get_free_heap_size());
+    delay_ms(delayTime);
+    //vTaskDelete(xHandleXDisplay);
+  }
+}
+**/
+#endif
+
+void user_make_thread(char *xBuffer, uint32_t xLength)
+{
+	//if(xBuffer[0]!='{') ;//return;  //cjson   &&data_buffer[length]!='}'如果有空格或者回车
+
+	cJSON * root = NULL;
+	cJSON * item = NULL;//cjson对象
+
+	root = cJSON_Parse(xBuffer);
+
+	if (!root)
+	{
+		printf("Error before: [%s]\n",cJSON_GetErrorPtr());
+	}
+	else
+	{
+		char *out = cJSON_PrintUnformatted(root);
+		printf("%s\n", "wu格式的方式print Json:");
+		printf("%s\n\n",out);
+		if(strcmp(out,"{\"status\":\"ok\"}")==0)
+		{
+			if(out)	free(out);
+			if(root)cJSON_Delete(root);
+			return;
+		}
+		if(out)	free(out);
+		//printf("%s\n", "无格式方式打印json：");
+		//printf("%s\n\n", cJSON_PrintUnformatted(root));//Memory Leak
+
+		   //printf("%s\n", "获取pid下的cjson对象");
+		item = cJSON_GetObjectItem(root, "pid");
+		if(item!=NULL&&item->type==cJSON_Number)
+			printf("pid %d\n", item->valueint);
+
+		item = cJSON_GetObjectItem(root, "type");
+		if(item!=NULL&&(item->type == cJSON_String))
+		{
+			//printf("type:%s\n", cJSON_Print(item));//"WIFI1" //memory leak
+			if(strcmp(item->valuestring,"APP2")==0)
+			{
+				printf("\r\nAPP Begin to Control WiFi!\r\n");
+
+			}
+			else if(strcmp(item->valuestring,"APP0")==0)
+			{
+				printf("\r\nAPP logined!\r\n");
+			}
+		}
+
+//					   printf("%s\n", "获取swVer下的cjson对象");
+//					   item = cJSON_GetObjectItem(root, "swVer");
+//						  if(item==NULL);
+//						  else
+//					   printf("swVer:%s\n", cJSON_Print(item));//memory leak
+
+
+		item = cJSON_GetObjectItem(root, "srcMac");
+		if(item!=NULL&&(item->type == cJSON_String))
+		{
+			 printf("%s:", item->valuestring);
+		}
+		item = cJSON_GetObjectItem(root , "dstMac");
+		if(item!=NULL&&(item->type == cJSON_String))
+		{
+			 printf("%s:", item->valuestring);
+		}
+		item = cJSON_GetObjectItem(root , "fan");//and 手动模式
+		if(item!=NULL&&(item->type == cJSON_Number))
+		{
+
+			 printf("fan %d:", item->valueint);
+		}
+
+
+
+	item = cJSON_GetObjectItem(root, "red");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		colorR=item->valueint;
+		printf("red %d\n", colorR);
+	}
+	item = cJSON_GetObjectItem(root, "green");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		colorG=item->valueint;
+		printf("green %d\n", colorG);
+	}
+	item = cJSON_GetObjectItem(root, "blue");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		colorB=item->valueint;
+		printf("blue %d\n", colorB);
+	}
+
+#if 0
+	item = cJSON_GetObjectItem(root, "illum");//lx read only
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		printf("illum %d\n", item->valueint);
+	}
+#endif
+
+	item = cJSON_GetObjectItem(root, "bright");
+	if(item!=NULL && (item->type == cJSON_Number))
+	{
+		brightValue=item->valueint;
+		switch(brightValue)
+		{
+			case 0:
+			break;
+			case 10:
+			break;
+			case 20:
+			break;
+			case 30:
+			break;
+			case 40:
+			break;
+			case 50:
+			break;
+			case 60:
+			break;
+			case 70:
+			break;
+			case 80:
+			break;
+			case 90:
+			break;
+			case 100:
+			break;
+			default:
+				break;
+
+		}
+		//colorR=colorR*brightValue/100;
+		//colorG=colorG*brightValue/100;
+		//colorB=colorB*brightValue/100;
+		printf("	R%d G%d B%d\n", colorR,colorG,colorB);
+	}
+	item = cJSON_GetObjectItem(root, "led"); //led switch on/off
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		printf("led %d\n", item->valueint);
+		switch(item->valueint)
+		{
+			case 0:
+				boolValue &= ((~BIT0)&0xFF);
+#if(ESPWS2812==1)
+				colorRGB.r=0;colorRGB.g= 0;colorRGB.b=0;
+				//colorRGB=makeRGBVal(0, 0, 0);
+				//ws2812_reset(WS2812_PIN);//turn off
+#endif
+				break;
+			case 1:
+				boolValue |= ((BIT0)&0x01);//turn on
+#if(ESPWS2812==1)
+				//colorRGB=makeRGBVal((colorR*brightValue/100), (colorG*brightValue/100), (colorB*brightValue/100));
+				colorRGB.r=(colorR*brightValue/100);colorRGB.g= (colorG*brightValue/100);colorRGB.b=(colorB*brightValue/100);
+#endif
+				break;
+			default:break;
+		}
+	}
+#if(ESPWS2812==1)
+
+	for(int i=0;i<pixel_count;i++)
+	{
+		pixels[i] = colorRGB;
+	}
+	//ws2812_setColors(pixel_count,  pixels);
+	WS2812B_setLeds(pixels, pixel_count);
+#endif
+	item = cJSON_GetObjectItem(root, "ledMode");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		ledMode=item->valueint;
+		printf("ledMode %d\n", ledMode);
+		if(ledMode==1)
+		{
+			if(xHandleLedDisplay!=NULL)
+				vTaskDelete(xHandleLedDisplay);//should delete task
+		}
+		else
+		{
+			if(xHandleLedDisplay==NULL)
+				xTaskCreate(rgbDisplay, "rgbDisplay", 4096, NULL, 7, &xHandleLedDisplay);//create a task or timer to do it
+		}
+		/**
+		switch(ledMode)
+		{
+			case 0://handle control
+				//
+			break;
+			case 1:
+				//ledMode=1;
+
+			break;
+			case 2://breath
+
+			break;
+			case 3://flow led
+
+			break;
+			case 4:
+
+			break;
+			case 5:
+#if(ESPWS2812==1)
+//			if(xHandleXDisplay==NULL)
+//				xTaskCreate(rainbow, "ws2812 rainbow demo", 4096, NULL, 10, &xHandleXDisplay);
+#endif
+			break;
+			case 6:
+#if(ESPWS2812==1)
+				if(xHandleXDisplay!=NULL)
+				vTaskDelete(xHandleXDisplay);
+#endif
+			break;
+
+			default:break;
+		}
+		**/
+	}
+	item = cJSON_GetObjectItem(root, "temp");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		setTemp = item->valueint;
+		printf("temp %d\n", setTemp);
+	}
+
+	item = cJSON_GetObjectItem(root, "humidity");//0~100
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		setHumidity = item->valueint;
+		printf("humidity %d\n", setHumidity);
+	}
+	item = cJSON_GetObjectItem(root, "fan");//on and off or pwm?
+	if(item!=NULL&&(item->type == cJSON_Number))//and 手动控制模式
+	{
+		printf("fan %d\n", item->valueint);
+		switch(item->valueint)
+		{
+			case 0:
+				boolValue &= ((~BIT1)&0xFF);//turn off fan
+				open_relay_0();
+				break;
+
+			case 1:
+				boolValue |= ((BIT1)&0x02);//turn on fan
+				close_relay_0();
+				break;
+			default:break;
+
+		}
+	}
+	item = cJSON_GetObjectItem(root, "pump");
+	if(item!=NULL&&(item->type == cJSON_Number)) //when in  手动控制模式
+	{
+		printf("pump %d\n", item->valueint);
+		switch(item->valueint)
+		{
+			case 0:
+				boolValue &= ((~BIT2)&0xFF);//turn off pump
+				close_relay_1();
+				break;
+			case 1:
+				boolValue |= ((BIT2)&0x04);//turn on pump
+				open_relay_1();
+				break;
+			default:break;
+		}
+	}
+	item = cJSON_GetObjectItem(root, "sound");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		printf("sound %d\n", item->valueint);
+		switch(item->valueint)
+		{
+			case 0:
+				boolValue &= ((~BIT3)&0xFF);//turn off
+
+				break;
+			case 1:
+				boolValue |= ((BIT3)&0x08);//turn on
+
+				break;
+			default:break;
+		}
+	}
+	item = cJSON_GetObjectItem(root, "live");
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		printf("live %d\n", item->valueint);
+		switch(item->valueint)
+		{
+			case 0:
+				boolValue &= ((~BIT4)&0xFF);//turn off
+				break;
+			case 1:
+				boolValue |= ((BIT4)&0x10);//turn on
+				break;
+			default:break;
+		}
+	}
+	item = cJSON_GetObjectItem(root, "nurseMode");//护理模式
+	if(item!=NULL&&(item->type == cJSON_Number))
+	{
+		nurseMode=item->valueint;
+		printf("nurseMode %d\n", nurseMode);
+		switch(nurseMode)
+		{
+			case manual://manual
+
+			break;
+			case semiAutomatic:// semi-automatic
+
+			break;
+			case automatic://automatic //should run in a task
+
+			break;
+			case customized:
+
+			break;
+			case aiMode:
+
+			break;
+			case 5:
+
+			break;
+			default:break;
+		}
+	}
+	/**
+	else if (item->type == cJSON_String)
+	{
+
+		if(strcmp(item->valuestring,"0")==0)
+			nurseMode=manual;
+		else if(strcmp(item->valuestring,"1")==0)
+			nurseMode=semiAutomatic;
+		else if(strcmp(item->valuestring,"2")==0)
+			nurseMode=automatic;
+		else if(strcmp(item->valuestring,"3")==0)
+			nurseMode=customized;
+		else if(strcmp(item->valuestring,"4")==0)
+			nurseMode=aiMode;
+		else
+			nurseMode=undefined;
+		printf("nurseMode %s==%d\n", item->valuestring, nurseMode);
+	}
+	 */
+//		if(root)
+//		{
+//			cJSON_Delete(root);
+//		}
+#if 0
+		if(item)
+		{
+			//printf("item %s\n", cJSON_Print(item));//memory leak
+			 if(item->type==cJSON_String)
+				 printf("item %s\n", item->valuestring);
+			 else if(item->type==cJSON_Number)
+				 printf("item %d\n", item->valueint);
+			 //free(item);
+		}
+#endif
+//		int ret=send(g_iSock_fd, "{\"status\":\"ok\"}", strlen("{\"status\":\"ok\"}"), 0);
+		//if(ret<0)
+		{
+	    	//socket_deinit();
+	    	//printf("Socket-responce-error %d\r\n",errno);
+		}
+	}
+	if(root)
+	{
+		cJSON_Delete(root);
+	}
+}
+
+
+
+
+
+//creak socket and rev task
+static void tcp_cli_task(void *pvParameters)
+{
+	char data_buffer[512];
+
+	int length;
+	int err;
+
+#if(ESPWS2812==1)
+	pixels = malloc(sizeof(wsRGB_t) * pixel_count);//free(pixels)
+	//ws2812_init(WS2812_PIN);
+	WS2812B_init(RMT_TX_CHANNEL,WS2812_PIN,pixel_count);
+#endif
+
+NEWBEGIN:
+	socket_init();//socket init
+//	err=send(g_iSock_fd, "\"type\":\"WIFI0\",\"srcMac\":\"A4-E9-75-3D-DC-D0\"", strlen("\"type\":\"WIFI0\",\"srcMac\":\"A4-E9-75-3D-DC-D0\""), 0);
+//    if(err<0)
+//    {
+//    	goto NEWBEGIN;
+//    }
+    while(1)
+	{
+    	int s;
+    	fd_set rfds;
+    	struct timeval tv =
+    	{
+    			.tv_sec = 2,
+				.tv_usec = 0,
+    	};
+
+    	FD_ZERO(&rfds);
+    	FD_SET(g_iSock_fd, &rfds);
+
+    	s = select((g_iSock_fd + 1), &rfds, NULL, NULL, &tv);
+
+    	if (s < 0)
+    	{
+    		printf("Select failed: errno %d\r\n", errno);
+    	}
+    	else if (s == 0)
+    	{
+    		//printf("Timeout has been reached and nothing has been received\r\n");
+    	}
+    	else
+    	{
+        	if (FD_ISSET(g_iSock_fd, &rfds))
+			{
+				if ((length = recv(g_iSock_fd, data_buffer, sizeof(data_buffer)-1,0)) > 0)
+				{
+					//data_buffer[length] = '\0';
+					//printf("%d bytes were received through: %s", length,data_buffer);
+					user_make_thread(data_buffer, length);
+					memset(data_buffer,0,length);
+				}
+				else
+				{
+
+					printf("rcv failed: errno %d\r\n", errno);
+					vTaskDelay(1000 / portTICK_RATE_MS);
+					goto NEWBEGIN;
+					//vTaskDelete(NULL);
+					//socket_init();
+				}
+			}
+    	}
+    	if(nurseMode==automatic)
+    	{
+#if 1
+			if(getTemp>setTempMax)
+			{
+					//status error TempMax
+			}
+			else if(getTemp<setTempMin)
+			{
+					//status error TempMin
+
+			}
+			if(setTemp>getTemp)  //设置温度大于实际温度  需要加热 关闭风扇
+			{
+				//boolValue |= ((BIT1)&0x02);//open heater
+				boolValue &= ((~BIT1)&0xFF);//
+				close_relay_0();//close cooler/fan
+			}
+			else
+			{
+				//boolValue &= ((~BIT1)&0xFF);//turn off//close heater
+				boolValue |= ((BIT1)&0x02);//
+				open_relay_0();//open cooler/fan
+			}
+
+			if(setHumidity>getHumidity)  //设置湿度大于实际湿度 打开水泵
+			{
+	//open water pump
+				boolValue |= ((BIT2)&0x04);//turn on pump
+				open_relay_1();
+			}
+			else
+			{
+	//close water pump
+				boolValue &= ((~BIT2)&0xFF);//turn off pump
+				close_relay_1();
+			}
+			if(getIllum>100)
+			{
+				brightValue-=10;
+			}
+			else if (getIllum<100)
+			{
+				brightValue+=10;
+			}
+#endif
+    	}
+
+	}
+}
+
+
+//create and send
+static void tcp_send_task(void *pvParameters)
+{
+//	uint32_t esp_timer_count =system_get_time();
+    //esp_timer_count=system_get_time();
+	int ret=0;
+	int Num=0;
+
+	//socket_init();
+
+	cJSON * root =  cJSON_CreateObject();//NULL
+//    cJSON * item =  cJSON_CreateObject();
+//    cJSON * next =  cJSON_CreateObject();
+
+	cJSON_AddItemToObject(root, "auth", cJSON_CreateString("TDP10"));
+    cJSON_AddItemToObject(root, "pid", cJSON_CreateNumber(Num));//根节点下添加  或者cJSON_AddNumberToObject(root, "pid",Num);
+    Num=1;
+    cJSON_AddItemToObject(root, "tid", cJSON_CreateNumber(Num));
+    cJSON_AddItemToObject(root, "type", cJSON_CreateString("WIFI0"));//或者  cJSON_AddStringToObject(root, "type", "WIFI0");
+	cJSON_AddItemToObject(root, "swVer", cJSON_CreateString("1.0"));
+	cJSON_AddItemToObject(root, "hwVer", cJSON_CreateString("1.0"));
+
+   // cJSON_AddItemToObject(root, "Mac", item);//root节点下添加节点MAC
+	//char *pStr=strMac;
+
+    cJSON_AddItemToObject(root, "srcMac",cJSON_CreateString(srcMAC));//strMac
+	cJSON_AddItemToObject(root, "dstMac",cJSON_CreateString("04-12-56-7E-2A-38"));
+
+    // 打印JSON数据包
+    char *out = cJSON_PrintUnformatted(root);//cJSON_Print(root);//
+    printf("%s\n", out);
+    ret=send(g_iSock_fd, out, strlen(out), 0);//canot use sizeof(cJSON_Print(root))
+    //int ret=write(g_iSock_fd, cJSON_Print(root), strlen(cJSON_Print(root)));
+    if(ret<0)
+    {
+    	socket_deinit();
+    	printf("Socket send error %d\r\n",errno);
+    }
+    if(root)
+		cJSON_Delete(root); // 释放内存
+	if(out)
+		free(out);
+
+//	ESP_LOGI(TAG,"get free size of 32BIT heap : %d\n",heap_caps_get_largest_free_block(MALLOC_CAP_32BIT));
+//	ESP_LOGI(TAG,"get free size of 8BIT heap : %d\n",heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+    free32=xPortGetFreeHeapSizeCaps( MALLOC_CAP_32BIT );////heap_caps_get_largest_free_block(MALLOC_CAP_32BIT);
+    free8=xPortGetFreeHeapSizeCaps( MALLOC_CAP_8BIT );//heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    free8start=xPortGetMinimumEverFreeHeapSizeCaps(MALLOC_CAP_8BIT);//heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    free32start=xPortGetMinimumEverFreeHeapSizeCaps(MALLOC_CAP_32BIT);//heap_caps_get_minimum_free_size(MALLOC_CAP_32BIT);
+//    ESP_LOGI(TAG, "Free heap: %u", xPortGetFreeHeapSize());
+    ESP_LOGI(TAG, "Free (largest free blocks) 8bit-capable memory : %d, 32-bit capable memory %d\n", free8, free32);
+    ESP_LOGI(TAG, "Free (min free size) 8bit-capable memory : %d, 32-bit capable memory %d\n", free8start, free32start);
+
+//    ESP_LOGI(TAG,"get free size of 32BIT heap : %d\n",xPortGetFreeHeapSizeCaps(MALLOC_CAP_32BIT));
     while(1)
     {
-		//adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)*0.985)+217.2);
-		adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)));//3.9V  ~  2^12=4096
-        printf("adc %f\n",(adc_read*3.9)/4096);
-#if 1 //OK
+
+		cJSON * root =  cJSON_CreateObject();//NULL
+	    //cJSON * item =  cJSON_CreateObject();
+
+		Num=1;
+		//cJSON_AddItemToObject(root, "AUTH", cJSON_CreateString("TDP10"));
+	    cJSON_AddItemToObject(root, "pid", cJSON_CreateNumber(Num));//根节点下添加  或者cJSON_AddNumberToObject(root, "rc",Num);
+	    Num=1;
+	    cJSON_AddItemToObject(root, "tid", cJSON_CreateNumber(Num++));
+	    cJSON_AddItemToObject(root, "type", cJSON_CreateString("WIFI1"));//或者  cJSON_AddStringToObject(root, "operation", "CALL");
+		//cJSON_AddItemToObject(root, "swVer", cJSON_CreateString("1.0"));
+		//cJSON_AddItemToObject(root, "hwVER", cJSON_CreateString("1.0"));
+
+	    cJSON_AddItemToObject(root, "srcMac",cJSON_CreateString(srcMAC));//strMac
+//    	cJSON_AddItemToObject(root, "dstMac",cJSON_CreateString("04-12-56-7E-2A-38"));
+
+#if(ESPDHT11==1)
+	    setDHTPin(DHT_GPIO);
+	    if(ReadDHT11(dhtData))  //get temprature
+	    {
+	    	uint8_t outstr[10];
+	    	DHT11_NumToString(dhtData[0],outstr);
+	    	//getHumidity=dhtData[2];
+	    	printf("Relative Humidity   :%s%%\r\n",outstr);
+
+	    	DHT11_NumToString(dhtData[1],outstr);
+
+	    	DHT11_NumToString(dhtData[2],outstr);
+	    	//getTemp=dhtData[2];
+	    	printf("Current Temperature :%sC\r\n",outstr);
+
+	    	DHT11_NumToString(dhtData[3],outstr);
+
+	    	getTemp=dhtData[2];
+	    	cJSON_AddItemToObject(root, "temp", cJSON_CreateNumber(dhtData[2]));
+	    	getHumidity=dhtData[0];
+	    	cJSON_AddItemToObject(root, "humidity", cJSON_CreateNumber(dhtData[0]));
+	    }
+	    else
+	    {
+	    	printf("--Read DHT11 Error!--\n");
+	    }
+
+#endif
+
+#if(ESPDS18B20==1)
 		if(ds18b20_init(DS_PIN))
 		{
 			uint8_t sn[8];
@@ -1886,12 +3007,16 @@ void adc1task(void* arg)
 			printf("ROM:");
 			for(int i=0;i<8;i++)
 			{
-				printf("%.2X ",sn[i]);  //ROM:28 D0 CA 5B 06 00 00 D8
+				printf("%.2X ",sn[i]);  //ROM:28 D0 CA 5B 06 00 00 D8  //ROM:28 FF 8E 4D A2 16 05 9C
 			}
 			printf("\n");
 			float temp=ds18b20_get_temp();
 			if(temp>-55&&temp<125)
-			printf("Temperature: %0.1fC\n",temp);
+			{
+				getTemp=temp;
+				printf("Temperature: %0.1fC\n",temp);
+				cJSON_AddItemToObject(root, "temp", cJSON_CreateNumber((int)temp+((int)(temp*10)%10)*0.1));//保留1位小数  //((float)((int)((temp+0.05)*10)))/10
+			}
 			else
 			{
 				printf("Error Temperature: %0.1f\n",temp);
@@ -1902,128 +3027,349 @@ void adc1task(void* arg)
 			printf("read Temperature fail\n");
 		}
 #endif
+#if (capHumidity==1)
+		if(capacity>0)
+		cJSON_AddItemToObject(root, "humidity", cJSON_CreateNumber(capacity));
+#endif
+#if (ADCENABLE==1)
+	uint16_t adc_read=0.;
+	// initialize ADC
+	adc1_config_width(ADC_WIDTH_12Bit);
+	adc1_config_channel_atten(ADC1_TEST_CHANNEL, ADC_ATTEN_11db);
+	adc_read= ((adc1_get_voltage(ADC1_TEST_CHANNEL)));//3.3V  ~  2^12=4096
+	printf("adc %d\n",adc_read);
+	//cJSON_AddItemToObject(root, "humidity", cJSON_CreateNumber(adc_read));
+	uint8_t rh=(100-((adc_read*100)/4096));
+	if((rh>0) && (rh<100))
+	{
+		getHumidity=rh;
+		cJSON_AddItemToObject(root, "humidity", cJSON_CreateNumber(rh));
+		printf("rh %d\n",rh);
 
-#if 0	//多点测温
+	}
 
-		//MAXNUM在ds18b20.h中定义
-		uint8_t ID_Buff[MAXNUM][8];
-		int i=0;
-		if(ds18b20_init(DS_PIN))
+#endif
+#if(ESPBH1750==1)
+		if(Init_BH1750(I2C_SDA, I2C_SCL)==0)
 		{
-			uint8_t num =ds18b20_searchROM(ID_Buff,MAXNUM);
-		    printf("总线上挂载的DS18B20数量为: %d\r\n",MAXNUM);
-		    printf("搜索到的DS18B20数量为: %d\r\n",num);
-		    for(i = 0;i < num;i ++)
-		    {
-		        printf("\r\n DS18B20 No%d ID: ",i);
-		        for(int j = 0;j < 8;j ++)
-		        {
-		            printf("%02X ",ID_Buff[i][j]);
-		        }
-		    }
-		    float Temp = ds18b20_aim_get_temp(ID_Buff[i++]);
-		    printf("\r\n 第%d个DS18B20温度为:%.2fC",i,Temp);
-		    if(i == num)
-		    {
-		         i = 0;
-		         printf("\r\n");
-		    }
+
+			getIllum=Read_BH1750();
+			if(getIllum!=NULL)
+			{
+				printf("--Ambient Light[%d]==%0.2flx\r\n",getIllum,(float)getIllum/1.2);
+				cJSON_AddItemToObject(root, "illum", cJSON_CreateNumber(getIllum));
+			}
+
+		}
+		else
+		{
+			printf("--Read BH1750 Error!--\n");
 		}
 #endif
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-#if 0
-        color.r=255;color.g=0;color.b=0;
-        for (uint8_t i = 0; i < pixel_count; i++)
-        {
-          pixels[i] = color;
-        }
-        WS2812B_setLeds(pixels,pixel_count);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
 
-        color.r=0;color.g=255;color.b=0;
-        for (uint8_t i = 0; i < pixel_count; i++)
-        {
-          pixels[i] = color;
-        }
-        WS2812B_setLeds(pixels,pixel_count);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+	    Num=28;
 
-        color.r=0;color.g=0;color.b=255;
-        for (uint8_t i = 0; i < pixel_count; i++)
-        {
-          pixels[i] = color;
-        }
-        WS2812B_setLeds(pixels,pixel_count);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+	    cJSON_AddItemToObject(root, "waterLevel", cJSON_CreateNumber(90));
+	    //cJSON_AddItemToObject(root, "illum", cJSON_CreateNumber(65535));
 
-        color.r=0;color.g=0;color.b=0;
-        for (uint8_t i = 0; i < pixel_count; i++)
-        {
-          pixels[i] = color;
-        }
-        WS2812B_setLeds(pixels,pixel_count);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+	    cJSON_AddItemToObject(root, "red", cJSON_CreateNumber(colorR));
+	    cJSON_AddItemToObject(root, "green", cJSON_CreateNumber(colorG));
+	    cJSON_AddItemToObject(root, "blue", cJSON_CreateNumber(colorB));
+	    cJSON_AddItemToObject(root, "bright", cJSON_CreateNumber(brightValue));
+
+	    cJSON_AddItemToObject(root, "led", cJSON_CreateNumber((boolValue>>0)&0x01));
+	    cJSON_AddItemToObject(root, "ledMode", cJSON_CreateNumber(ledMode));
+	    cJSON_AddItemToObject(root, "nurseMode", cJSON_CreateNumber(nurseMode));
+	    cJSON_AddItemToObject(root, "fan", cJSON_CreateNumber((boolValue>>1)&0x01));
+	    cJSON_AddItemToObject(root, "pump", cJSON_CreateNumber((boolValue>>2)&0x01));
+	    cJSON_AddItemToObject(root, "sound", cJSON_CreateNumber((boolValue>>3)&0x01));
+	    cJSON_AddItemToObject(root, "live", cJSON_CreateNumber((boolValue>>4)&0x01));
+
+	    char *out = cJSON_Print(root);
+	    printf("%s\n", out);	// 打印JSON数据包
+	    ret=send(g_iSock_fd, out, strlen(out), 0);//canot use sizeof(cJSON_Print(root))  //memory leak
+		if(root)
+		{
+			cJSON_Delete(root);
+		}
+		if(out)
+			free(out);
+	    if(ret<0)
+	    {
+	    	//socket_deinit();
+	    	printf("--send Error!--\n");
+	    	socket_init();
+	    }
+
+//		ESP_LOGI(TAG,"get free size of 32BIT heap : %d\n",heap_caps_get_largest_free_block(MALLOC_CAP_32BIT));
+//		ESP_LOGI(TAG,"get free size of 8BIT heap : %d\n",heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#if 1
+	    free32=xPortGetFreeHeapSizeCaps( MALLOC_CAP_32BIT );////heap_caps_get_largest_free_block(MALLOC_CAP_32BIT);
+	    free8=xPortGetFreeHeapSizeCaps( MALLOC_CAP_8BIT );//heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+	    free8start=xPortGetMinimumEverFreeHeapSizeCaps(MALLOC_CAP_8BIT);//heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+	    free32start=xPortGetMinimumEverFreeHeapSizeCaps(MALLOC_CAP_32BIT);//heap_caps_get_minimum_free_size(MALLOC_CAP_32BIT);
+	    ESP_LOGI(TAG, "#Free heap: %u", xPortGetFreeHeapSize());
+	    ESP_LOGI(TAG, "#Free (largest free blocks) 8bit-capable memory : %d, 32-bit capable memory %d\n", free8, free32);
+	    ESP_LOGI(TAG, "#Free (min free size) 8bit-capable memory : %d, 32-bit capable memory %d\n", free8start, free32start);
+
+//	    ESP_LOGI(TAG,"#get free size of 32BIT heap : %d\n",xPortGetFreeHeapSizeCaps(MALLOC_CAP_32BIT));
 #endif
-        //pulsing LED/pulsing rhythm/breathing LED
-        for(int i=1;i<CONST_RESPIRATION_LAMP_SERIES-20;i++)
-        {
-            color.r=0;color.g=RESPIRATION_LAMP_TABLE[i];color.b=0;
-            for (uint8_t i = 0; i < pixel_count; i++)
-            {
-              pixels[i] = color;
-            }
-            WS2812B_setLeds(pixels,pixel_count);
-            ets_delay_us(20000);//15ms  //18
-        }
-
-        for(int i=CONST_RESPIRATION_LAMP_SERIES-20;i>0;i--)
-        {
-            color.r=0;color.g=RESPIRATION_LAMP_TABLE[i];color.b=0;
-            for (uint8_t i = 0; i < pixel_count; i++)
-            {
-              pixels[i] = color;
-            }
-            WS2812B_setLeds(pixels,pixel_count);
-            ets_delay_us(20000);//15ms
-        }
-
-        color.r=0;color.g=0;color.b=0;
-        for (uint8_t i = 1; i < pixel_count; i++)
-        {
-            pixels[i] = color;
-        }
-        WS2812B_setLeds(pixels,pixel_count);
-        ets_delay_us(100000);//100ms
-
-
-
-        for (uint8_t i = 1; i < pixel_count; i++)
-        {
-        	color.r=0;color.g=0;color.b=PWM_TABLE[i];
-            pixels[i] = color;
-            WS2812B_setLeds(pixels,i);
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-        }
-        for (uint8_t i = 1; i < pixel_count; i++)
-        {
-        	color.r=PWM_TABLE[i];color.g=0;color.b=0;
-            pixels[i] = color;
-            WS2812B_setLeds(pixels,i);
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-        }
-        for (uint8_t i = 1; i < pixel_count; i++)
-        {
-        	color.r=0;color.g=PWM_TABLE[i];color.b=0;
-            pixels[i] = color;
-            WS2812B_setLeds(pixels,i);
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-        }
+	    vTaskDelay(10000 / portTICK_RATE_MS);//10s
     }
 }
 
-void app_main()
+static EventGroupHandle_t wifi_event_group;
+const int CONNECTED_BIT = BIT0;
+static ip4_addr_t s_ip_addr;
+
+static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
-	printf("start calibration\n");
-    xTaskCreate(adc1task, "adc1task", 1024*3, NULL, 10, NULL);
+    switch (event->event_id) {
+        case SYSTEM_EVENT_STA_START:
+            esp_wifi_connect();
+            break;
+        case SYSTEM_EVENT_STA_GOT_IP:
+            xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
+            s_ip_addr = event->event_info.got_ip.ip_info.ip;
+
+           // xTaskCreate(&tcp_server_task, "tcp_server_task", 4096, NULL, 5, NULL);//tcp server task
+            break;
+        case SYSTEM_EVENT_STA_DISCONNECTED:
+            /* This is a workaround as ESP32 WiFi libs don't currently
+             auto-reassociate. */
+            esp_wifi_connect();
+            xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
+            break;
+        case  SYSTEM_EVENT_AP_STACONNECTED:
+        	ESP_LOGI(TAG, "get Connected");
+
+        	break;
+        case      SYSTEM_EVENT_AP_STADISCONNECTED:
+
+        	break;
+
+        default:
+            break;
+    }
+    return ESP_OK;
 }
 
+static void init_wifi_sta(void)
+{
+    tcpip_adapter_init();
+    wifi_event_group = xEventGroupCreate();
+    ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
+    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+    //printf("CONFIG_WIFI_PASSWORD IS %s\n",WIFI_PASSWORD);
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASSWORD,
+        },
+    };
+    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
+    //ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+    ESP_ERROR_CHECK( esp_wifi_start() );
+    ESP_ERROR_CHECK( esp_wifi_set_ps(WIFI_PS_NONE) );
+    ESP_LOGI(TAG, "Connecting to \"%s\"", wifi_config.sta.ssid);
+    xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+    ESP_LOGI(TAG, "Connected");
+}
+
+/* Can run 'make menuconfig' to choose the GPIO to blink,
+   or you can edit the following line and set a number here.
+*/
+
+#define BUF_SIZE 2*1024*1024  //2048KB
+//----------------
+void spiram_test_task(void *pvParameter)
+{
+    uint32_t t1, t2, t3, t4;
+    uint8_t *buf1;
+    uint8_t *buf2;
+    uint8_t *pbuf1;
+    uint8_t *pbuf2;
+    uint8_t testb=0x5A;
+    uint32_t idx;
+    int pass = 0;
+    while (1)  {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        pass++;
+        if (pass > 9) break;
+
+        if (pass % 2) testb = 0xA5;
+        else testb = 0x5A;
+
+        printf("\n======= PSRAM Test (%u bytes block) pass %d =======\n", BUF_SIZE, pass);
+
+        buf1 = (uint8_t *)0x3f800000;
+        buf2 = (uint8_t *)0x3f800000+BUF_SIZE;
+
+        t1 = clock();
+        memset(buf1, testb, 2048);//BUF_SIZE
+        memset(buf2, testb, BUF_SIZE);
+        t1 = clock() - t1;
+        printf("--\n");
+        for (idx=0; idx<2048;idx++) {
+            printf("%02X ", buf1[idx]);
+        }
+        printf("--\n");
+        t2 = clock();
+        int res = memcmp(buf1, buf2, BUF_SIZE);
+        t2 = clock() - t2;
+
+        pbuf1 = buf1;
+        pbuf2 = buf2;
+        t4 = clock();
+        for (idx=0; idx < BUF_SIZE; idx++) {
+            *pbuf1++ = testb;
+        }
+        for (idx=0; idx < BUF_SIZE; idx++) {
+            *pbuf2++ = testb;
+        }
+        t4 = clock() - t4;
+
+        pbuf1 = buf1;
+        pbuf2 = buf1;
+        t3 = clock();
+        for (idx=0; idx < BUF_SIZE; idx++) {
+            if (*pbuf1 != *pbuf2) break;
+            pbuf1++;
+            pbuf2++;
+        }
+        t3 = clock() - t3;
+
+        float bs = ((1000.0 / (float)t1 * (float)(BUF_SIZE*2))) / 1048576.0;
+        printf("               memset time: %u ms; %f MB/sec\n", t1, bs);
+        bs = ((1000.0 / (float)t2 * (float)(BUF_SIZE))) / 1048576.0;
+        if (res == 0) printf("               memcmp time: %u ms; %f Mcompares/sec\n", t2, bs);
+        else printf("               memcmp time: %u ms; FAILED (%d)\n", t2, res);
+
+        bs = ((1000.0 / (float)t4 * (float)(BUF_SIZE*2))) / 1048576.0;
+        printf("   Memory set in loop time: %u ms; %f MB/sec\n", t4, bs);
+        bs = ((1000.0 / (float)t3 * (float)(BUF_SIZE))) / 1048576.0;
+        printf("  Compare in loop time idx: %u ms; %f Mcompares/sec (%u of %u OK)\n", t4, bs, idx, BUF_SIZE);
+        printf("      1st 16 bytes of buf1: ");
+        for (idx=0; idx<16;idx++) {
+            printf("%02X ", buf1[idx]);
+        }
+        printf("\n");
+        printf("      1st 16 bytes of buf2: ");
+        for (idx=0; idx<16;idx++) {
+            printf("%02X ", buf2[idx]);
+        }
+        printf("\n");
+    }
+}
+
+
+void app_main()
+{
+//2048
+	//xTaskCreate(&spiram_test_task, "spiram_test_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+	//	xTaskCreate(&spiram_test_task, "spiram_test_task", 2048, NULL, 5, NULL);
+	gpioInit();
+
+    currFbPtr = (volatile uint32_t)pvPortMallocCaps(320*240*2, MALLOC_CAP_32BIT);
+
+    ESP_LOGI(TAG,"%s=%p\n",currFbPtr == NULL ? "------currFbPtr is NULL------" : "==========currFbPtr not NULL======",currFbPtr );
+
+    ESP_LOGI(TAG,"get free size of 32BIT heap : %d\n",xPortGetFreeHeapSizeCaps(MALLOC_CAP_32BIT));
+
+    ESP_LOGI(TAG,"Starting nvs_flash_init ...");
+    nvs_flash_init();
+
+    //vTaskDelay(3000 / portTICK_RATE_MS);
+
+    ESP_LOGI(TAG, "Free heap: %u", xPortGetFreeHeapSize());
+
+#if BTENABLE	//	BTENABLE
+	esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+	if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
+	        ESP_LOGE(BT_AV_TAG, "%s initialize controller failed\n", __func__);
+	        return;
+	}
+
+	if (esp_bt_controller_enable(ESP_BT_MODE_BTDM) != ESP_OK) {
+	        ESP_LOGE(BT_AV_TAG, "%s enable controller failed\n", __func__);
+	        return;
+	}
+
+	if (esp_bluedroid_init() != ESP_OK) {
+	        ESP_LOGE(BT_AV_TAG, "%s initialize bluedroid failed\n", __func__);
+	        return;
+	}
+
+	if (esp_bluedroid_enable() != ESP_OK) {
+	        ESP_LOGE(BT_AV_TAG, "%s enable bluedroid failed\n", __func__);
+	        return;
+	}
+
+	i2sdac_init();
+
+	/* create application task */
+	bt_app_task_start_up();
+
+	/* Bluetooth device name, connection mode and profile set up */
+	bt_app_work_dispatch(bt_av_hdl_stack_evt, BT_APP_EVT_STACK_UP, NULL, 0, NULL);
+#endif //enf of BTENABLE
+
+	vTaskDelay(3000 / portTICK_RATE_MS);
+    ESP_LOGI(TAG, "Wifi Initialized...");
+    init_wifi_sta();
+    //init_wifi_ap();
+
+    vTaskDelay(2000 / portTICK_RATE_MS);
+
+    //char macFormat[] = "%02X-%02X-%02X-%02X-%02X-%02X";
+
+    xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+        esp_wifi_get_mac(ESP_IF_WIFI_STA,wifiMac);
+
+    sprintf(strMac, "%02X-%02X-%02X-%02X-%02X-%02X", wifiMac[0], wifiMac[1], wifiMac[2], wifiMac[3], wifiMac[4], wifiMac[5]);
+    printf("srcMAC: %s\n",strMac);
+
+
+	xTaskCreate(&tcp_cli_task, "tcp_cli_task", 4096, NULL, 9, NULL);//TCP Client create and rcv task
+	vTaskDelay(5000 / portTICK_RATE_MS);
+	xTaskCreate(&tcp_send_task, "tcp_send_task", 2048, NULL, 6, NULL);//TCP Client Send Task
+
+#if (capHumidity==1)
+	//gpio
+    gpio_config_t io_conf;
+
+    //interrupt of rising edge
+    io_conf.intr_type = GPIO_PIN_INTR_POSEDGE;
+    //bit mask of the pins, use GPIO0/33 here
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    //set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+
+    //change gpio intrrupt type for one pin
+    gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
+
+    //create a queue to handle gpio event from isr
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    //start gpio task
+    xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 7, NULL);
+
+    //install gpio isr service
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
+
+    //remove isr handler for gpio number.
+    gpio_isr_handler_remove(GPIO_INPUT_IO_0);
+    //hook isr handler for specific gpio pin again
+    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+#endif
+}

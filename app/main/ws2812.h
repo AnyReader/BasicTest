@@ -1,35 +1,46 @@
-/* Created 19 Nov 2016 by Chris Osborn <fozztexx@fozztexx.com>
- * http://insentricity.com
- *
- * This is a driver for the WS2812 RGB LEDs using the RMT peripheral on the ESP32.
- *
- * This code is placed in the public domain (or CC0 licensed, at your option).
- */
+/*  Copyright (C) 2017  Florian Menne
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
-#ifndef WS2812_DRIVER_H
-#define WS2812_DRIVER_H
+#ifndef _WS2812_H_
+#define _WS2812_H_
 
-#include <stdint.h>
+#include "driver/rmt.h"
 
-typedef union {
-  struct __attribute__ ((packed)) {
-    uint8_t r, g, b;
-  };
-  uint32_t num;
-} rgbVal;
-
-extern void ws2812_init(int gpioNum);
-extern void ws2812_setColors(unsigned int length, rgbVal *array);
-
-inline rgbVal makeRGBVal(uint8_t r, uint8_t g, uint8_t b)
+typedef struct
 {
-  rgbVal v;
+	uint8_t g;
+	uint8_t b;
+	uint8_t r;
+}wsRGB_t;
 
+/**
+ * Init RMT module and allocates space
+ * @param channel RMT channel
+ * @param gpio GPIO Pin
+ * @param size Number of LED's
+ */
+void WS2812B_init(rmt_channel_t channel, gpio_num_t gpio, unsigned int size);
 
-  v.r = r;
-  v.g = g;
-  v.b = b;
-  return v;
-}
+/**
+ * Writes to the LED
+ * @param data
+ * @param size Number of LED's - Must not exceed initialization size
+ */
+void WS2812B_setLeds(wsRGB_t* data, unsigned int size);
 
-#endif /* WS2812_DRIVER_H */
+/**
+ * Deinit driver and free memory space
+ */
+void WS2812B_deInit(void);
+
+#endif /* MAIN_WS2812B_H_ */

@@ -1,15 +1,3 @@
-/*
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-    You should have received a copy of the GNU General Public License
-     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
@@ -246,10 +234,8 @@ unsigned char ds18b20_CHECK(void)//add by Charlin
     	retry++;
     	ets_delay_us(1);
     };
-
     if(retry>=200)return 1;
 	else retry=0;
-
     while (!gpio_get_level(DS_GPIO)&&retry<240)
     {
     	retry++;

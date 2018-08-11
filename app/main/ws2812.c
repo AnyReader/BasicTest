@@ -1,189 +1,150 @@
-/* Created 19 Nov 2016 by Chris Osborn <fozztexx@fozztexx.com>
- * http://insentricity.com
- *
- * Uses the RMT peripheral on the ESP32 for very accurate timing of
- * signals sent to the WS2812 LEDs.
- *
- * This code is placed in the public domain (or CC0 licensed, at your option).
- */
+/*  Copyright (C) 2017  Florian Menne
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 #include "ws2812.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
-#include <soc/rmt_struct.h>
-#include <soc/dport_reg.h>
-#include <driver/gpio.h>
-#include <soc/gpio_sig_map.h>
-#include <esp_intr.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <driver/rmt.h>
 
-#define ETS_RMT_CTRL_INUM	18
-#define ESP_RMT_CTRL_DISABLE	ESP_RMT_CTRL_DIABLE /* Typo in esp_intr.h */
+#include "string.h"
 
-#define DIVIDER		4 /* Above 4, timings start to deviate*/
-#define DURATION	12.5 /* minimum time of a single RMT duration
-				in nanoseconds based on clock */
+#include "stdio.h"
 
-#define PULSE_T0H	(  350 / (DURATION * DIVIDER));
-#define PULSE_T1H	(  900 / (DURATION * DIVIDER));
-#define PULSE_T0L	(  900 / (DURATION * DIVIDER));
-#define PULSE_T1L	(  350 / (DURATION * DIVIDER));
-#define PULSE_TRS	(50000 / (DURATION * DIVIDER));
 
-#define MAX_PULSES	32
 
-#define RMTCHANNEL	0
+#ifndef CONFIG_WS2812B_INVERTED
+#define CONFIG_WS2812B_INVERTED 1
+#endif
 
-typedef union {
-  struct {
-    uint32_t duration0:15;
-    uint32_t level0:1;
-    uint32_t duration1:15;
-    uint32_t level1:1;
-  };
-  uint32_t val;
-} rmtPulsePair;
+#ifndef CONFIG_WS2812B_USE_PL9823
+#define CONFIG_WS2812B_USE_PL9823 0
+#endif
 
-static uint8_t *ws2812_buffer = NULL;
-static unsigned int ws2812_pos, ws2812_len, ws2812_half;
-static xSemaphoreHandle ws2812_sem = NULL;
-static intr_handle_t rmt_intr_handle = NULL;
-static rmtPulsePair ws2812_bits[2];
+#if CONFIG_WS2812B_INVERTED == 0
+#if CONFIG_WS2812B_USE_PL9823 == 0
+static const rmt_item32_t wsLogicZero = {.level0 = 1, .duration0 = 32, .level1 = 0, .duration1 = 68};
+static const rmt_item32_t wsLogicOne = {.level0 = 1, .duration0 = 64, .level1 = 0, .duration1 = 36};
+#else
+static const rmt_item32_t wsLogicZero = {.level0 = 1, .duration0 = 28, .level1 = 0, .duration1 = 109};
+static const rmt_item32_t wsLogicOne = {.level0 = 1, .duration0 = 109, .level1 = 0, .duration1 = 28};
+#endif
 
-void ws2812_initRMTChannel(int rmtChannel)
+#else
+#if CONFIG_WS2812B_USE_PL9823 == 0
+//not inverting   gpio>------> to LED     tested with 8 x WS2812B LED's OK.
+static const rmt_item32_t wsLogicOne = {.level0 = 0, .duration0 = 32, .level1 = 1, .duration1 = 64};//示波器实测   32-400ns  68-860ns
+static const rmt_item32_t wsLogicZero = {.level0 = 0, .duration0 = 64, .level1 = 1, .duration1 = 32};//示波器实测  64 - 800ns  36-460ns
+/**Level shifter (inverting)
+ *       ^ 5V
+         |
+        ---
+        | |
+        | |  RES
+        ---
+         |
+         |---> to LED
+         |
+         –
+gpio>---|  N-FET
+         –
+         |
+         |
+         |
+        --- GND
+**/
+//static const rmt_item32_t wsLogicZero = {.level0 = 0, .duration0 = 32, .level1 = 1, .duration1 = 68};
+//static const rmt_item32_t wsLogicOne =  {.level0 = 0, .duration0 = 64, .level1 = 1, .duration1 = 36};
+#else
+static const rmt_item32_t wsLogicZero = {.level0 = 0, .duration0 = 28, .level1 = 1, .duration1 = 109};
+static const rmt_item32_t wsLogicOne = {.level0 = 0, .duration0 = 109, .level1 = 1, .duration1 = 28};
+#endif
+
+#endif
+
+static rmt_channel_t channel;
+static unsigned int size;
+static rmt_item32_t* items;
+
+void WS2812B_init(rmt_channel_t chan, gpio_num_t gpio, unsigned int psize)
 {
-  RMT.apb_conf.fifo_mask = 1;  //enable memory access, instead of FIFO mode.
-  RMT.apb_conf.mem_tx_wrap_en = 1; //wrap around when hitting end of buffer
-  RMT.conf_ch[rmtChannel].conf0.div_cnt = DIVIDER;
-  RMT.conf_ch[rmtChannel].conf0.mem_size = 1;
-  RMT.conf_ch[rmtChannel].conf0.carrier_en = 0;
-  RMT.conf_ch[rmtChannel].conf0.carrier_out_lv = 1;
-  RMT.conf_ch[rmtChannel].conf0.mem_pd = 0;
+	channel = chan;
+	size = psize;
+	items = NULL;
 
-  RMT.conf_ch[rmtChannel].conf1.rx_en = 0;
-  RMT.conf_ch[rmtChannel].conf1.mem_owner = 0;
-  RMT.conf_ch[rmtChannel].conf1.tx_conti_mode = 0;    //loop back mode.
-  RMT.conf_ch[rmtChannel].conf1.ref_always_on = 1;    // use apb clock: 80M
-  RMT.conf_ch[rmtChannel].conf1.idle_out_en = 1;
-  RMT.conf_ch[rmtChannel].conf1.idle_out_lv = 0;
+	if(!size)
+	{
+		printf("%s: %d Invalid size 0!\n", __FILE__, __LINE__);
+		return;
+	}
 
-  return;
+	if(NULL == (items = malloc(sizeof(rmt_item32_t) * size * 24)))
+	{
+		printf("%s: %d Unable to allocate space!\n", __FILE__, __LINE__);
+		return;
+	}
+
+	rmt_config_t rmt_tx;
+	memset(&rmt_tx, 0, sizeof(rmt_config_t));
+
+	rmt_tx.channel = channel;
+	rmt_tx.gpio_num = gpio;
+	rmt_tx.mem_block_num = 1;
+	rmt_tx.clk_div = 1;
+	rmt_tx.tx_config.idle_output_en = 1;
+#if CONFIG_WS2812B_INVERTED == 1
+	rmt_tx.tx_config.idle_level = RMT_IDLE_LEVEL_HIGH;
+#endif
+
+	rmt_config(&rmt_tx);
+	rmt_driver_install(rmt_tx.channel, 0, 0);
 }
 
-void ws2812_copy()
+void WS2812B_setLeds(wsRGB_t* data, unsigned int size)
 {
-  unsigned int i, j, offset, len, bit;
+	unsigned int itemCnt = 0;
+	//if(size<0) return;//add by Charlin
+	for(int i = 0; i < size; i++)
+		for(int j = 0; j < 24; j++)
+		{
+			if(j < 8)
+			{
+#if CONFIG_WS2812B_USE_PL9823 == 0
+				if(data[i].g & (1<<(7-j))) items[itemCnt++] = wsLogicOne;
+#else
+				if(data[i].r & (1<<(7-j))) items[itemCnt++] = wsLogicOne;
+#endif
+				else items[itemCnt++] = wsLogicZero;
+			}
 
+			else if (j < 16)
+			{
+#if CONFIG_WS2812B_USE_PL9823 == 0
+				if(data[i].r & (1<<(7 - (j%8) ))) items[itemCnt++] = wsLogicOne;
+#else
+				if(data[i].g & (1<<(7 - (j%8) ))) items[itemCnt++] = wsLogicOne;
+#endif
+				else items[itemCnt++] = wsLogicZero;
+			}
+			else
+			{
+				if(data[i].b & (1<<( 7 - (j%8) ))) items[itemCnt++] = wsLogicOne;
+				else items[itemCnt++] = wsLogicZero;
+			}
 
-  offset = ws2812_half * MAX_PULSES;
-  ws2812_half = !ws2812_half;
+		}
 
-  len = ws2812_len - ws2812_pos;
-  if (len > (MAX_PULSES / 8))
-    len = (MAX_PULSES / 8);
-
-  if (!len) {
-    for (i = 0; i < MAX_PULSES; i++)
-      RMTMEM.chan[RMTCHANNEL].data32[i + offset].val = 0;
-    return;
-  }
-
-  for (i = 0; i < len; i++) {
-    bit = ws2812_buffer[i + ws2812_pos];
-    for (j = 0; j < 8; j++, bit <<= 1) {
-      RMTMEM.chan[RMTCHANNEL].data32[j + i * 8 + offset].val =
-	ws2812_bits[(bit >> 7) & 0x01].val;
-    }
-    if (i + ws2812_pos == ws2812_len - 1)
-      RMTMEM.chan[RMTCHANNEL].data32[7 + i * 8 + offset].duration1 = PULSE_TRS;
-  }
-
-  for (i *= 8; i < MAX_PULSES; i++)
-    RMTMEM.chan[RMTCHANNEL].data32[i + offset].val = 0;
-
-  ws2812_pos += len;
-  return;
+	rmt_write_items(channel, items, size * 24, false);
 }
 
-void ws2812_handleInterrupt(void *arg)
+void WS2812B_deInit()
 {
-  portBASE_TYPE taskAwoken = 0;
-
-
-  if (RMT.int_st.ch0_tx_thr_event) {
-    ws2812_copy();
-    RMT.int_clr.ch0_tx_thr_event = 1;
-  }
-  else if (RMT.int_st.ch0_tx_end && ws2812_sem) {
-    xSemaphoreGiveFromISR(ws2812_sem, &taskAwoken);
-    RMT.int_clr.ch0_tx_end = 1;
-  }
-
-  return;
-}
-
-void ws2812_init(int gpioNum)
-{
-  DPORT_SET_PERI_REG_MASK(DPORT_PERIP_CLK_EN_REG, DPORT_RMT_CLK_EN);
-  DPORT_CLEAR_PERI_REG_MASK(DPORT_PERIP_RST_EN_REG, DPORT_RMT_RST);
-
-  rmt_set_pin((rmt_channel_t)RMTCHANNEL, RMT_MODE_TX, (gpio_num_t)gpioNum);
-
-  ws2812_initRMTChannel(RMTCHANNEL);
-
-  RMT.tx_lim_ch[RMTCHANNEL].limit = MAX_PULSES;
-  RMT.int_ena.ch0_tx_thr_event = 1;
-  RMT.int_ena.ch0_tx_end = 1;
-
-  ws2812_bits[0].level0 = 1;
-  ws2812_bits[0].level1 = 0;
-  ws2812_bits[0].duration0 = PULSE_T0H;
-  ws2812_bits[0].duration1 = PULSE_T0L;
-  ws2812_bits[1].level0 = 1;
-  ws2812_bits[1].level1 = 0;
-  ws2812_bits[1].duration0 = PULSE_T1H;
-  ws2812_bits[1].duration1 = PULSE_T1L;
-
-  esp_intr_alloc(ETS_RMT_INTR_SOURCE, 0, ws2812_handleInterrupt, NULL, &rmt_intr_handle);
-
-  return;
-}
-
-void ws2812_setColors(unsigned int length, rgbVal *array)
-{
-  unsigned int i;
-
-
-  ws2812_len = (length * 3) * sizeof(uint8_t);
-  ws2812_buffer = malloc(ws2812_len);
-
-  for (i = 0; i < length; i++) {
-    ws2812_buffer[0 + i * 3] = array[i].g;
-    ws2812_buffer[1 + i * 3] = array[i].r;
-    ws2812_buffer[2 + i * 3] = array[i].b;
-  }
-
-  ws2812_pos = 0;
-  ws2812_half = 0;
-
-  ws2812_copy();
-
-  if (ws2812_pos < ws2812_len)
-    ws2812_copy();
-
-  ws2812_sem = xSemaphoreCreateBinary();
-
-  RMT.conf_ch[RMTCHANNEL].conf1.mem_rd_rst = 1;
-  RMT.conf_ch[RMTCHANNEL].conf1.tx_start = 1;
-
-  xSemaphoreTake(ws2812_sem, portMAX_DELAY);
-  vSemaphoreDelete(ws2812_sem);
-  ws2812_sem = NULL;
-
-  free(ws2812_buffer);
-
-  return;
+	rmt_driver_uninstall(channel);
+	free(items);
 }
